@@ -1,0 +1,100 @@
+import { ScrollView } from "std-widgets.slint";
+import { Colors, Space, Radius, Motion, Type, Size } from "@tokens";
+import { App, Metric, PeerDiag } from "state.slint";
+import { Icons, Icon, Label, Muted, Title, Card, Button, Pill, Sparkline, SectionHeader } from "widgets.slint";
+
+component MetricCell inherits Rectangle {
+    in property <Metric> m;
+    min-width: 150px;
+    height: 76px;
+    border-radius: Radius.md;
+    background: Colors.surface-raised;
+    VerticalLayout {
+        padding: Space.md;
+        spacing: Space.xxs;
+        Muted { text: root.m.label; overflow: elide; }
+        Text {
+            text: root.m.value;
+            color: Colors.text;
+            font-size: Type.body-strong-size;
+            font-weight: Type.body-strong-weight;
+            font-family: Type.family;
+            overflow: elide;
+        }
+        Sparkline { height: 18px; commands: root.m.spark; }
+    }
+}
+
+// Metrics in a wrapping grid of fixed-height cells.
+component MetricGrid inherits Rectangle {
+    in property <[Metric]> metrics;
+    property <length> gap: Space.sm;
+    property <int> cols: max(1, floor((self.width + gap) / (170px + gap)));
+    property <length> cell-w: (self.width - (cols - 1) * gap) / cols;
+    height: ceil(metrics.length / cols) * (76px + gap) - gap;
+    for m[i] in root.metrics: MetricCell {
+        x: mod(i, root.cols) * (root.cell-w + root.gap);
+        y: floor(i / root.cols) * (76px + root.gap);
+        width: root.cell-w;
+        m: m;
+    }
+}
+
+export component DiagnosticsScreen inherits Rectangle {
+    background: Colors.bg;
+    ScrollView {
+        VerticalLayout {
+            padding: Space.xxl;
+            spacing: Space.xl;
+            alignment: start;
+            HorizontalLayout {
+                spacing: Space.md;
+                Text {
+                    text: "Diagnostics";
+                    color: Colors.text;
+                    font-size: Type.headline-size;
+                    font-weight: Type.headline-weight;
+                    font-family: Type.family;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Button {
+                    text: "Export report";
+                    icon: Icons.download;
+                    kind: "ghost";
+                    clicked => { App.export-diagnostics(); }
+                }
+            }
+            if App.export-result != "": Muted { text: App.export-result; wrap: word-wrap; }
+            SectionHeader { text: "THIS DEVICE"; }
+            MetricGrid { metrics: App.diag-global; }
+            if App.diag-peers.length == 0: Muted { text: "Per-peer statistics appear here during a call (updated every second)."; }
+            for p in App.diag-peers: Card {
+                height: pc.preferred-height;
+                pc := VerticalLayout {
+                    padding: Space.lg;
+                    spacing: Space.md;
+                    HorizontalLayout {
+                        spacing: Space.sm;
+                        Text {
+                            text: p.name;
+                            color: Colors.text;
+                            font-size: Type.subtitle-size;
+                            font-weight: Type.subtitle-weight;
+                            font-family: Type.family;
+                            vertical-alignment: center;
+                        }
+                        Pill {
+                            y: (parent.height - self.height) / 2;
+                            text: p.path-kind;
+                            tint: p.path-kind == "LAN" ? Colors.success : Colors.accent;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    Muted { text: "Local " + p.local + "   ·   Remote " + p.remote + "   ·   " + p.candidates; wrap: word-wrap; }
+                    MetricGrid { metrics: p.metrics; }
+                }
+            }
+        }
+    }
+}

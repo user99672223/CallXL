@@ -1,0 +1,209 @@
+import { ScrollView, LineEdit, Slider, ComboBox } from "std-widgets.slint";
+import { Colors, Space, Radius, Motion, Type, Size } from "@tokens";
+import { App, AudioDeviceItem } from "state.slint";
+import { Icons, Icon, Label, Muted, Title, Card, Button, ToggleRow, SectionHeader, Avatar, Dot } from "widgets.slint";
+
+component Section inherits Card {
+    in property <string> heading;
+    height: col.preferred-height;
+    col := VerticalLayout {
+        padding: Space.xl;
+        padding-top: Space.lg;
+        spacing: Space.xs;
+        SectionHeader { text: root.heading; }
+        @children
+    }
+}
+
+component Row inherits HorizontalLayout {
+    in property <string> text;
+    in property <string> detail;
+    spacing: Space.lg;
+    min-height: 56px;
+    VerticalLayout {
+        alignment: center;
+        spacing: Space.xxs;
+        horizontal-stretch: 1;
+        Label { text: root.text; }
+        if root.detail != "": Muted { text: root.detail; wrap: word-wrap; }
+    }
+    @children
+}
+
+export component SettingsScreen inherits Rectangle {
+    background: Colors.bg;
+    property <int> slider-kbps: App.bitrate;
+    ScrollView {
+        VerticalLayout {
+            padding: Space.xxl;
+            spacing: Space.xl;
+            alignment: start;
+            Text {
+                text: "Settings";
+                color: Colors.text;
+                font-size: Type.headline-size;
+                font-weight: Type.headline-weight;
+                font-family: Type.family;
+            }
+            Section {
+                heading: "AUDIO PROCESSING";
+                ToggleRow {
+                    text: "Raw mic";
+                    detail: "Turns off echo cancellation, noise suppression, high-pass filter and gain control in one tap.";
+                    checked: App.raw-mic;
+                    toggled(v) => { App.set-raw-mic(v); }
+                }
+                ToggleRow {
+                    text: "Echo cancellation";
+                    checked: App.aec;
+                    toggled(v) => { App.set-apm(v, App.ns, App.ns-level, App.hpf, App.agc); }
+                }
+                ToggleRow {
+                    text: "Noise suppression";
+                    checked: App.ns;
+                    toggled(v) => { App.set-apm(App.aec, v, App.ns-level, App.hpf, App.agc); }
+                }
+                Row {
+                    text: "Noise suppression level";
+                    ComboBox {
+                        y: (parent.height - self.height) / 2;
+                        width: 160px;
+                        enabled: App.ns;
+                        model: ["Low", "Moderate", "High"];
+                        current-index: App.ns-level;
+                        selected(v) => { App.set-apm(App.aec, App.ns, self.current-index, App.hpf, App.agc); }
+                    }
+                }
+                ToggleRow {
+                    text: "High-pass filter";
+                    checked: App.hpf;
+                    toggled(v) => { App.set-apm(App.aec, App.ns, App.ns-level, v, App.agc); }
+                }
+                ToggleRow {
+                    text: "Automatic gain control";
+                    checked: App.agc;
+                    toggled(v) => { App.set-apm(App.aec, App.ns, App.ns-level, App.hpf, v); }
+                }
+            }
+            Section {
+                heading: "QUALITY";
+                Row {
+                    text: "Maximum bitrate";
+                    detail: "CallXL starts at this rate on your network and adapts automatically on the internet.";
+                    Text {
+                        vertical-alignment: center;
+                        text: root.slider-kbps + " kbps";
+                        color: Colors.text;
+                        font-size: Type.body-strong-size;
+                        font-weight: Type.body-strong-weight;
+                        font-family: Type.family;
+                    }
+                }
+                Slider {
+                    minimum: 32;
+                    maximum: 510;
+                    value: App.bitrate;
+                    changed(v) => { root.slider-kbps = round(v); }
+                    released(v) => { App.set-bitrate(round(v)); }
+                }
+            }
+            Section {
+                heading: "DEVICES";
+                Row {
+                    text: "Microphone";
+                    detail: App.input-name;
+                    Button { y: (parent.height - self.height) / 2; text: "Change"; kind: "ghost"; clicked => { root.picking = 1; App.refresh-devices(); } }
+                }
+                Row {
+                    text: "Speaker";
+                    detail: App.output-name;
+                    Button { y: (parent.height - self.height) / 2; text: "Change"; kind: "ghost"; clicked => { root.picking = 2; App.refresh-devices(); } }
+                }
+                if root.picking > 0: VerticalLayout {
+                    spacing: Space.xxs;
+                    for d in (root.picking == 1 ? App.inputs : App.outputs): Rectangle {
+                        height: 40px;
+                        border-radius: Radius.sm;
+                        background: dt.has-hover ? Colors.surface-raised : transparent;
+                        HorizontalLayout {
+                            padding-left: Space.sm;
+                            spacing: Space.sm;
+                            Rectangle {
+                                width: 18px;
+                                if d.selected: Icon { path: Icons.check; size: 18px; color: Colors.accent; }
+                            }
+                            Label { text: d.name; vertical-alignment: center; overflow: elide; }
+                        }
+                        dt := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if (root.picking == 1) { App.select-input(d.id); } else { App.select-output(d.id); }
+                                root.picking = 0;
+                            }
+                        }
+                    }
+                }
+            }
+            Section {
+                heading: "YOU";
+                Row {
+                    text: "Display name";
+                    LineEdit {
+                        y: (parent.height - self.height) / 2;
+                        width: 260px;
+                        text: App.display-name;
+                        accepted(t) => { if (t != "") { App.set-display-name(t); } }
+                    }
+                }
+                Row {
+                    text: "Your safety key";
+                    detail: App.safety-key;
+                }
+            }
+            Section {
+                heading: "TRUSTED DEVICES";
+                if App.trusted.length == 0: Muted { text: "No trusted devices yet."; }
+                for d in App.trusted: Row {
+                    text: d.name;
+                    detail: d.online ? "Online" : "Offline";
+                    Button {
+                        y: (parent.height - self.height) / 2;
+                        text: "Forget";
+                        kind: "quiet";
+                        clicked => { App.untrust(d.key); }
+                    }
+                }
+            }
+            Section {
+                heading: "FILES";
+                Row {
+                    text: "Download folder";
+                    detail: App.download-dir;
+                    Button { y: (parent.height - self.height) / 2; text: "Change"; icon: Icons.folder; kind: "ghost"; clicked => { App.pick-download-dir(); } }
+                }
+            }
+            Section {
+                heading: "CONNECTION";
+                Row {
+                    text: "Signaling server";
+                    detail: "Used for sessions outside your network. Leave empty for the default.";
+                }
+                LineEdit {
+                    text: App.signaling-url;
+                    placeholder-text: App.effective-signaling-url;
+                    accepted(t) => { App.set-signaling-url(t); }
+                }
+            }
+            Section {
+                heading: "APPEARANCE";
+                ToggleRow {
+                    text: "Dark theme";
+                    checked: Colors.dark;
+                    toggled(v) => { App.set-theme(v); }
+                }
+            }
+            Muted { text: "CallXL " + App.version; }
+        }
+    }
+    in-out property <int> picking: 0;
+}
