@@ -546,3 +546,11 @@ verified. Effect is measurable only after the merge (integration-branch runs war
 shared entries); until then feature-branch builds rely on sccache. Rejected: dropping the
 libwebrtc cache (download is only 8 s on Linux, but the brief requires it and Windows/iOS
 archives are larger).
+
+D-0088 (2026-11-07, p2/infra-qa) — `DEFAULT_SIGNALING_URL` is now
+`wss://callxl.hbadgujar44.workers.dev/ws`, the Worker deployed by `worker.yml` (run
+42355101376, D-0076), replacing the `<account>` placeholder (orchestrator decision after
+the PR #2 review). The Settings override (`set_signaling_url`) is unchanged; HANDOFF.md §4
+says how to change the default after a redeploy under another Cloudflare account. The
+e2e peers keep running with `--no-cloud` unless a test passes a local Worker URL, so CI
+does not contact the deployed Worker.

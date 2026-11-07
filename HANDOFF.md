@@ -64,19 +64,18 @@ generates it once and keeps it in Cloudflare's secret store (rotate by hand with
 
 ## 4. Signaling URL
 
-- Built-in default: `DEFAULT_SIGNALING_URL` in `crates/core/src/config.rs`, currently the
-  placeholder `wss://callxl.<account>.workers.dev/ws` (the app then skips the cloud
-  quietly and works on the LAN).
-- `worker.yml` prints the real one at the end of a deploy ("Signaling URL for
-  DEFAULT_SIGNALING_URL / Settings: wss://callxl.<subdomain>.workers.dev/ws") and in the
-  job summary.
-- **Deployed:** `worker.yml` run 42355101376 deployed the Worker to
-  `https://callxl.hbadgujar44.workers.dev` (`/health` ok), so the signaling URL is
-  `wss://callxl.hbadgujar44.workers.dev/ws`. **TODO(orchestrator):** set it as
-  `DEFAULT_SIGNALING_URL` before tagging v0.1.0 (or leave the placeholder and have users
-  enter it in Settings).
-- Either put it into `config.rs` and tag a new release (every install then uses it), or
-  enter it per device in Settings → Signaling URL (stored locally, overrides the default).
+- Built-in default: `DEFAULT_SIGNALING_URL` in `crates/core/src/config.rs` =
+  `wss://callxl.hbadgujar44.workers.dev/ws`, the Worker `worker.yml` deployed
+  (run [42355101376](https://github.com/user99672223/CallXL/actions/runs/42355101376),
+  `/health` ok). Every build uses it unless overridden.
+- Per device: Settings → Signaling URL (stored locally, overrides the default; clearing
+  it returns to the default).
+- **Redeploying under another Cloudflare account:** replace the repository secrets
+  `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` (§3), run Actions → **worker** → Run
+  workflow, copy the URL it prints at the end ("Signaling URL for DEFAULT_SIGNALING_URL /
+  Settings: wss://callxl.<subdomain>.workers.dev/ws", also in the job summary) into
+  `DEFAULT_SIGNALING_URL`, and cut a new release (§1) so the apps carry it. Until then,
+  users can enter the new URL in Settings.
 
 ## 5. What CI verified
 

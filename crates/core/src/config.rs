@@ -1,8 +1,9 @@
 //! Build-time and default configuration (CLAUDE.md §5, §12).
 
-/// Cloud signaling endpoint (Cloudflare Worker). Placeholder until the user deploys
-/// the Worker; overridable in Settings (`set_signaling_url`).
-pub const DEFAULT_SIGNALING_URL: &str = "wss://callxl.<account>.workers.dev/ws";
+/// Cloud signaling endpoint: the Worker deployed by `.github/workflows/worker.yml`
+/// (run 42355101376). Overridable in Settings (`set_signaling_url`); after a redeploy
+/// under another Cloudflare account, put the URL that workflow prints here.
+pub const DEFAULT_SIGNALING_URL: &str = "wss://callxl.hbadgujar44.workers.dev/ws";
 
 /// Presented to the Worker to obtain a 1-hour token. Baked in at build time from env
 /// `CALLXL_APP_SECRET` (CI secret); a random DEV value otherwise (see build.rs).
