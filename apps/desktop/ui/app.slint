@@ -1,0 +1,311 @@
+import { LineEdit, Palette } from "std-widgets.slint";
+import { Colors, Space, Radius, Motion, Type, Size } from "@tokens";
+import { App, SessionItem, DeviceItem, PeerItem, ChatItem, Metric, PeerDiag, AudioDeviceItem, RecipientItem } from "state.slint";
+import { Icons, Icon, Label, Muted, Title, Card, Button, Avatar, Modal, Pill } from "widgets.slint";
+import { HomeScreen } from "home.slint";
+import { CallScreen } from "call.slint";
+import { ChatPanel } from "chat.slint";
+import { DiagnosticsScreen } from "diagnostics.slint";
+import { SettingsScreen } from "settings.slint";
+
+export { App, Colors, SessionItem, DeviceItem, PeerItem, ChatItem, Metric, PeerDiag, AudioDeviceItem, RecipientItem }
+
+component NavItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> selected;
+    in property <int> badge;
+    callback clicked();
+    width: 56px;
+    height: 56px;
+    border-radius: Radius.lg;
+    background: root.selected ? Colors.accent.with-alpha(0.16) : t.has-hover ? Colors.surface-raised : transparent;
+    animate background { duration: Motion.fast; }
+    accessible-role: tab;
+    accessible-label: root.label;
+    Icon { path: root.icon; size: 22px; color: root.selected ? Colors.accent : Colors.text-muted; }
+    if root.badge > 0: Rectangle {
+        x: parent.width - 16px;
+        y: 6px;
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        background: Colors.accent;
+    }
+    t := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "CallXL";
+    icon: @image-url("@icons/png/callxl-256.png");
+    preferred-width: 1120px;
+    preferred-height: 740px;
+    min-width: 760px;
+    min-height: 540px;
+    background: Colors.bg;
+    default-font-family: Type.family;
+    default-font-size: Type.body-size;
+
+    init => {
+        Palette.color-scheme = Colors.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    property <bool> theme-dark: Colors.dark;
+    changed theme-dark => {
+        Palette.color-scheme = Colors.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    // Exposed for the screenshot tests and the headless smoke check.
+    in-out property <bool> ui-ready;
+    callback core-started();
+
+    HorizontalLayout {
+        // Navigation rail.
+        Rectangle {
+            width: Size.sidebar;
+            background: Colors.surface;
+            VerticalLayout {
+                padding-top: Space.lg;
+                padding-bottom: Space.lg;
+                spacing: Space.sm;
+                alignment: start;
+                Image {
+                    x: (parent.width - self.width) / 2;
+                    width: 36px;
+                    height: 36px;
+                    source: @image-url("@icons/png/callxl-64.png");
+                }
+                Rectangle { height: Space.lg; }
+                NavItem {
+                    x: (parent.width - self.width) / 2;
+                    icon: Icons.home; label: "Home";
+                    selected: App.screen == 0;
+                    clicked => { App.screen = 0; }
+                }
+                if App.in-call: NavItem {
+                    x: (parent.width - self.width) / 2;
+                    icon: Icons.call; label: "Call";
+                    selected: App.screen == 1;
+                    clicked => { App.screen = 1; }
+                }
+                NavItem {
+                    x: (parent.width - self.width) / 2;
+                    icon: Icons.chat; label: "Chat";
+                    selected: App.screen == 2;
+                    badge: App.screen == 2 || App.drawer-open ? 0 : App.unread;
+                    clicked => { App.screen = 2; App.chat-shown(); }
+                }
+                NavItem {
+                    x: (parent.width - self.width) / 2;
+                    icon: Icons.activity; label: "Diagnostics";
+                    selected: App.screen == 3;
+                    clicked => { App.screen = 3; }
+                }
+                NavItem {
+                    x: (parent.width - self.width) / 2;
+                    icon: Icons.sliders; label: "Settings";
+                    selected: App.screen == 4;
+                    clicked => { App.screen = 4; }
+                }
+            }
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                background: Colors.border;
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            if App.screen == 0: HomeScreen { }
+            if App.screen == 1: CallScreen { }
+            if App.screen == 2: ChatPanel { }
+            if App.screen == 3: DiagnosticsScreen { }
+            if App.screen == 4: SettingsScreen { }
+        }
+    }
+
+    // ---- Dialogs ----
+    if App.new-session-open: Modal {
+        dismissed => { App.new-session-open = false; }
+        Title { text: "New session"; }
+        Muted { text: "Give it a name so people know what they are joining (optional)."; wrap: word-wrap; }
+        name := LineEdit {
+            placeholder-text: "e.g. Movie night";
+            init => { self.focus(); }
+            accepted(t) => {
+                App.create-session(t);
+                App.new-session-open = false;
+            }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: Space.sm;
+            Button { text: "Cancel"; kind: "quiet"; clicked => { App.new-session-open = false; } }
+            Button {
+                text: "Start session";
+                clicked => {
+                    App.create-session(name.text);
+                    App.new-session-open = false;
+                }
+            }
+        }
+    }
+
+    if App.trust-open: Modal {
+        dismissed => { App.dismiss-trust(); }
+        HorizontalLayout {
+            spacing: Space.md;
+            Icon { path: Icons.shield; size: 28px; color: App.trust-key-changed ? Colors.danger : Colors.accent; }
+            Title {
+                text: App.trust-key-changed ? "Key changed — trust again?" : "Trust " + App.trust-name + "?";
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+        Muted {
+            wrap: word-wrap;
+            text: App.trust-key-changed
+                ? App.trust-name + " has a new key (for example after a reinstall). If they read you the same six words, trust again."
+                : "If " + App.trust-name + " sees the same six words, it is really them.";
+        }
+        Rectangle {
+            height: phrase.preferred-height + 2 * Space.lg;
+            border-radius: Radius.md;
+            background: Colors.surface-raised;
+            phrase := Text {
+                x: Space.lg;
+                width: parent.width - 2 * Space.lg;
+                horizontal-alignment: center;
+                text: App.trust-phrase;
+                wrap: word-wrap;
+                color: Colors.text;
+                font-size: Type.subtitle-size;
+                font-weight: Type.subtitle-weight;
+                font-family: Type.family;
+            }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: Space.sm;
+            Button { text: "Not now"; kind: "quiet"; clicked => { App.dismiss-trust(); } }
+            Button { text: App.trust-key-changed ? "Trust again" : "Trust this device"; icon: Icons.check; clicked => { App.trust(App.trust-key); } }
+        }
+    }
+
+    if App.offer-open: Modal {
+        dismissed => { }
+        HorizontalLayout {
+            spacing: Space.md;
+            Icon { path: Icons.file; size: 28px; color: Colors.accent; }
+            Title { text: App.offer-from + " wants to send you a file"; wrap: word-wrap; vertical-alignment: center; }
+        }
+        Rectangle {
+            height: 56px;
+            border-radius: Radius.md;
+            background: Colors.surface-raised;
+            HorizontalLayout {
+                padding: Space.md;
+                spacing: Space.sm;
+                Label { text: App.offer-name; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
+                Muted { text: App.offer-size; vertical-alignment: center; }
+            }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: Space.sm;
+            Button { text: "Decline"; kind: "quiet"; clicked => { App.respond-offer(App.offer-id, false); } }
+            Button { text: "Accept"; icon: Icons.download; clicked => { App.respond-offer(App.offer-id, true); } }
+        }
+    }
+
+    if App.send-open: Modal {
+        dismissed => { App.cancel-send(); }
+        Title { text: "Send to…"; }
+        Muted { text: App.send-files; wrap: word-wrap; }
+        if App.recipients.length == 0: Muted { text: "Nobody else is in the call yet."; }
+        for r[i] in App.recipients: Rectangle {
+            height: 48px;
+            border-radius: Radius.md;
+            background: rt.has-hover ? Colors.surface-raised : transparent;
+            HorizontalLayout {
+                padding-left: Space.sm;
+                spacing: Space.md;
+                Rectangle {
+                    width: 22px;
+                    height: 22px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: Radius.sm;
+                    background: r.checked ? Colors.accent : transparent;
+                    border-width: r.checked ? 0px : 2px;
+                    border-color: Colors.border;
+                    if r.checked: Icon { path: Icons.check; size: 16px; color: Colors.on-accent; }
+                }
+                Label { text: r.name; vertical-alignment: center; }
+            }
+            rt := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { App.toggle-recipient(i); }
+            }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: Space.sm;
+            Button { text: "Cancel"; kind: "quiet"; clicked => { App.cancel-send(); } }
+            Button { text: "Send"; icon: Icons.send; clicked => { App.send-to-recipients(); } }
+        }
+    }
+
+    // Toast (errors from core's plain-English reasons, confirmations).
+    if App.toast != "": Rectangle {
+        y: parent.height - self.height - Space.xl;
+        x: (parent.width - self.width) / 2;
+        width: min(560px, parent.width - 2 * Space.xl);
+        height: tt.preferred-height + 2 * Space.md;
+        border-radius: Radius.md;
+        background: App.toast-error ? Colors.danger : Colors.surface-raised;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000055;
+        tt := Text {
+            x: Space.lg;
+            width: parent.width - 2 * Space.lg;
+            text: App.toast;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+            color: App.toast-error ? #FFFFFF : Colors.text;
+            font-size: Type.body-size;
+            font-family: Type.family;
+        }
+        TouchArea { clicked => { App.toast = ""; } }
+    }
+}
+
+// System tray (Windows notification area, Linux StatusNotifierItem via ksni).
+export component Tray inherits SystemTrayIcon {
+    icon: @image-url("@icons/png/callxl-64.png");
+    tooltip: root.in-call ? "CallXL — in a call" : "CallXL";
+    title: "CallXL";
+    in property <bool> in-call;
+    in property <bool> muted;
+    callback show();
+    callback toggle-mute();
+    callback leave();
+    callback quit();
+    clicked => { root.show(); }
+    Menu {
+        MenuItem { title: "Show CallXL"; activated => { root.show(); } }
+        MenuItem {
+            title: root.muted ? "Unmute" : "Mute";
+            enabled: root.in-call;
+            activated => { root.toggle-mute(); }
+        }
+        MenuItem {
+            title: "Leave call";
+            enabled: root.in-call;
+            activated => { root.leave(); }
+        }
+        MenuSeparator { }
+        MenuItem { title: "Quit"; activated => { root.quit(); } }
+    }
+}

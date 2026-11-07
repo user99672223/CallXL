@@ -1,0 +1,189 @@
+// UI state and commands. Rust (src/view.rs, src/bridge.rs) fills the models from the
+// core's snapshot/events and handles every callback by sending a command to the core.
+// The UI holds no call logic (CLAUDE.md §9).
+
+export struct SessionItem {
+    id: string,
+    title: string,
+    members: string,
+    member-count: int,
+    lan: bool,
+    joined: bool,
+}
+
+export struct DeviceItem {
+    key: string,
+    name: string,
+    initials: string,
+    hue: color,
+    online: bool,
+}
+
+// One participant tile (index 0 is always "you").
+export struct PeerItem {
+    key: string,
+    name: string,
+    initials: string,
+    hue: color,
+    is-self: bool,
+    connected: bool,
+    speaking: bool,
+    muted: bool,
+    trusted: bool,
+    // "LAN", "Direct", "Relayed" or "" while connecting.
+    path-kind: string,
+    // e.g. "IPv6" / "IPv4"
+    path-family: string,
+}
+
+export struct ChatItem {
+    id: string,
+    sender: string,
+    body: string,
+    time: string,
+    own: bool,
+    // "", "Sending", "Sent", "Delivered", "Read"
+    status: string,
+    // File card fields (is-file = true).
+    is-file: bool,
+    file-name: string,
+    file-size: string,
+    file-state: string,
+    progress: float,
+    can-accept: bool,
+    can-cancel: bool,
+    can-open: bool,
+    path: string,
+}
+
+export struct Metric {
+    label: string,
+    value: string,
+    // Sparkline as SVG path commands in a 100 x 15 viewbox ("" = none).
+    spark: string,
+}
+
+export struct PeerDiag {
+    name: string,
+    path-kind: string,
+    local: string,
+    remote: string,
+    candidates: string,
+    metrics: [Metric],
+}
+
+export struct AudioDeviceItem {
+    id: string,
+    name: string,
+    selected: bool,
+}
+
+export struct RecipientItem {
+    key: string,
+    name: string,
+    checked: bool,
+}
+
+export global App {
+    // Navigation: 0 home, 1 call, 2 chat, 3 diagnostics, 4 settings.
+    in-out property <int> screen: 0;
+    in-out property <bool> started: false;
+    in-out property <string> version;
+
+    // Identity / home.
+    in-out property <string> display-name;
+    in-out property <string> device-initials;
+    in-out property <color> device-hue: #6C8CFF;
+    in-out property <string> safety-key;
+    in-out property <[SessionItem]> sessions;
+    in-out property <[DeviceItem]> trusted;
+    in-out property <bool> cloud-connected;
+    in-out property <string> network-status: "Looking for sessions on your network…";
+
+    // Call.
+    in-out property <bool> in-call;
+    in-out property <string> call-title;
+    // "Joining…", "Connected", "Reconnecting…", ""
+    in-out property <string> call-status;
+    in-out property <bool> call-reconnecting;
+    in-out property <[PeerItem]> peers;
+    in-out property <bool> muted;
+    in-out property <bool> drawer-open;
+    in-out property <bool> file-hover;
+    in-out property <int> unread;
+
+    // Chat.
+    in-out property <[ChatItem]> chat;
+    in-out property <string> chat-title: "Chat";
+
+    // Devices.
+    in-out property <[AudioDeviceItem]> inputs;
+    in-out property <[AudioDeviceItem]> outputs;
+    in-out property <string> input-name: "System default";
+    in-out property <string> output-name: "System default";
+
+    // Diagnostics.
+    in-out property <[PeerDiag]> diag-peers;
+    in-out property <[Metric]> diag-global;
+    in-out property <string> export-result;
+
+    // Settings.
+    in-out property <bool> aec: true;
+    in-out property <bool> ns: true;
+    in-out property <int> ns-level: 1;
+    in-out property <bool> hpf: true;
+    in-out property <bool> agc: true;
+    in-out property <bool> raw-mic: false;
+    in-out property <int> bitrate: 510;
+    in-out property <string> download-dir;
+    in-out property <string> signaling-url;
+    in-out property <string> effective-signaling-url;
+
+    // Dialogs.
+    in-out property <bool> new-session-open;
+    in-out property <bool> trust-open;
+    in-out property <string> trust-key;
+    in-out property <string> trust-name;
+    in-out property <string> trust-phrase;
+    in-out property <bool> trust-key-changed;
+    in-out property <bool> offer-open;
+    in-out property <string> offer-id;
+    in-out property <string> offer-from;
+    in-out property <string> offer-name;
+    in-out property <string> offer-size;
+    in-out property <bool> send-open;
+    in-out property <string> send-files;
+    in-out property <[RecipientItem]> recipients;
+    in-out property <string> toast;
+    in-out property <bool> toast-error;
+
+    // Commands (handled in Rust; never block the UI thread).
+    callback create-session(string);
+    callback join-session(string);
+    callback leave();
+    callback toggle-mute();
+    callback set-display-name(string);
+    callback trust(string);
+    callback dismiss-trust();
+    callback untrust(string);
+    callback send-chat(string);
+    callback chat-shown();
+    callback respond-offer(string, bool);
+    callback cancel-transfer(string);
+    callback open-folder(string);
+    callback pick-files();
+    callback toggle-recipient(int);
+    callback send-to-recipients();
+    callback cancel-send();
+    callback select-input(string);
+    callback select-output(string);
+    callback refresh-devices();
+    callback set-apm(bool, bool, int, bool, bool);
+    callback set-raw-mic(bool);
+    callback set-bitrate(int);
+    callback set-download-dir(string);
+    callback pick-download-dir();
+    callback set-signaling-url(string);
+    callback set-theme(bool);
+    callback export-diagnostics();
+}

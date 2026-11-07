@@ -1,0 +1,191 @@
+import { ListView, LineEdit } from "std-widgets.slint";
+import { Colors, Space, Radius, Motion, Type, Size } from "@tokens";
+import { App, ChatItem } from "state.slint";
+import { Icons, Icon, Label, Muted, Title, Card, Button } from "widgets.slint";
+
+component FileCard inherits Rectangle {
+    in property <ChatItem> item;
+    in property <length> avail: 340px;
+    width: min(340px, root.avail);
+    height: col.preferred-height;
+    border-radius: Radius.lg;
+    background: Colors.surface-raised;
+    border-width: 1px;
+    border-color: Colors.border;
+    col := VerticalLayout {
+        padding: Space.md;
+        spacing: Space.sm;
+        HorizontalLayout {
+            spacing: Space.md;
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: Radius.md;
+                background: Colors.accent.with-alpha(0.14);
+                Icon { path: Icons.file; color: Colors.accent; }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: Space.xxs;
+                Label { text: root.item.file-name; overflow: elide; font-weight: 600; }
+                Muted { text: root.item.file-size + " · " + root.item.file-state; overflow: elide; }
+            }
+        }
+        if root.item.progress > 0 && root.item.progress < 1: Rectangle {
+            height: 6px;
+            border-radius: 3px;
+            background: Colors.border;
+            Rectangle {
+                x: 0;
+                width: parent.width * root.item.progress;
+                height: 100%;
+                border-radius: 3px;
+                background: Colors.accent;
+                animate width { duration: Motion.normal; }
+            }
+        }
+        if root.item.can-accept || root.item.can-cancel || root.item.can-open: HorizontalLayout {
+            spacing: Space.sm;
+            alignment: end;
+            if root.item.can-accept: Button {
+                text: "Decline";
+                kind: "quiet";
+                clicked => { App.respond-offer(root.item.id, false); }
+            }
+            if root.item.can-accept: Button {
+                text: "Accept";
+                icon: Icons.download;
+                clicked => { App.respond-offer(root.item.id, true); }
+            }
+            if root.item.can-cancel: Button {
+                text: "Cancel";
+                kind: "quiet";
+                clicked => { App.cancel-transfer(root.item.id); }
+            }
+            if root.item.can-open: Button {
+                text: "Open in folder";
+                icon: Icons.folder;
+                kind: "ghost";
+                clicked => { App.open-folder(root.item.path); }
+            }
+        }
+    }
+}
+
+component Bubble inherits Rectangle {
+    in property <ChatItem> item;
+    property <length> max-w: min(420px, root.width * 0.8);
+    height: col.preferred-height + Space.xs;
+    col := VerticalLayout {
+        spacing: Space.xxs;
+        alignment: start;
+        if !root.item.own: Muted {
+            x: Space.sm;
+            text: root.item.time == "" ? root.item.sender : root.item.sender + "  ·  " + root.item.time;
+        }
+        HorizontalLayout {
+            alignment: root.item.own ? end : start;
+            if root.item.is-file: FileCard { item: root.item; avail: root.max-w; }
+            if !root.item.is-file: Rectangle {
+                width: min(root.max-w, body.preferred-width + 2 * Space.md);
+                height: body.preferred-height + 2 * Space.sm + 2px;
+                border-radius: Radius.lg;
+                background: root.item.own ? Colors.accent : Colors.surface-raised;
+                body := Text {
+                    x: Space.md;
+                    y: Space.sm;
+                    width: parent.width - 2 * Space.md;
+                    text: root.item.body;
+                    wrap: word-wrap;
+                    color: root.item.own ? Colors.on-accent : Colors.text;
+                    font-size: Type.body-size;
+                    font-family: Type.family;
+                }
+            }
+        }
+        if root.item.own: HorizontalLayout {
+            alignment: end;
+            Muted { text: root.item.time + (root.item.status != "" ? "  ·  " + root.item.status : ""); }
+        }
+    }
+}
+
+export component ChatPanel inherits Rectangle {
+    in property <bool> compact;
+    callback close();
+    background: Colors.surface;
+    // Keep the newest message in view.
+    property <int> count: App.chat.length;
+    changed count => {
+        list.content-y = min(0px, list.visible-height - list.content-height);
+    }
+    VerticalLayout {
+        HorizontalLayout {
+            padding: Space.lg;
+            padding-left: Space.xl;
+            spacing: Space.md;
+            Title {
+                text: App.chat-title;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            if App.in-call: Button {
+                icon: Icons.upload;
+                kind: "quiet";
+                text: root.compact ? "" : "Send file";
+                clicked => { App.pick-files(); }
+            }
+            if root.compact: Button {
+                icon: Icons.close;
+                kind: "quiet";
+                clicked => { root.close(); }
+            }
+        }
+        Rectangle { height: 1px; background: Colors.border; }
+        Rectangle {
+            vertical-stretch: 1;
+            list := ListView {
+                for m in App.chat: Rectangle {
+                    height: b.height + Space.sm;
+                    b := Bubble {
+                        x: Space.lg;
+                        y: Space.xs;
+                        width: parent.width - 2 * Space.lg;
+                        item: m;
+                    }
+                }
+            }
+            if App.chat.length == 0: Muted {
+                width: parent.width - 2 * Space.xxl;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+                text: App.in-call ? "Messages are end-to-end encrypted and only go to the people in this call." : "Join a session to chat.";
+            }
+        }
+        Rectangle { height: 1px; background: Colors.border; }
+        HorizontalLayout {
+            padding: Space.md;
+            spacing: Space.sm;
+            input := LineEdit {
+                enabled: App.in-call;
+                placeholder-text: App.in-call ? "Message" : "Join a session to chat";
+                font-size: Type.body-size;
+                accepted(t) => {
+                    if (t != "") {
+                        App.send-chat(t);
+                        self.text = "";
+                    }
+                }
+            }
+            Button {
+                icon: Icons.send;
+                enabled: App.in-call && input.text != "";
+                clicked => {
+                    App.send-chat(input.text);
+                    input.text = "";
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,259 @@
+import { ScrollView } from "std-widgets.slint";
+import { Colors, Space, Radius, Motion, Type, Size } from "@tokens";
+import { App, PeerItem, AudioDeviceItem } from "state.slint";
+import { Icons, Icon, Label, Muted, Title, Card, Button, RoundButton, Avatar, Pill } from "widgets.slint";
+import { ChatPanel } from "chat.slint";
+
+// Participant tile. The speaking glow animates opacity/shadow only: geometry never
+// changes, so the grid is never re-laid out (60 fps, no allocation per frame).
+component Tile inherits Rectangle {
+    in property <PeerItem> peer;
+    border-radius: Radius.xl;
+    background: Colors.surface;
+    drop-shadow-blur: root.peer.speaking ? 24px : 0px;
+    drop-shadow-color: root.peer.speaking ? Colors.speaking-glow : transparent;
+    animate drop-shadow-blur, drop-shadow-color { duration: Motion.glow; easing: ease-out; }
+    // Glow ring.
+    Rectangle {
+        border-radius: Radius.xl;
+        border-width: 3px;
+        border-color: Colors.speaking-glow;
+        opacity: root.peer.speaking ? 1 : 0;
+        animate opacity { duration: Motion.glow; easing: ease-out; }
+    }
+    Rectangle {
+        border-radius: Radius.xl;
+        border-width: 1px;
+        border-color: Colors.border;
+        opacity: root.peer.speaking ? 0 : 1;
+    }
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.sm;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Avatar {
+                initials: root.peer.initials;
+                hue: root.peer.hue;
+                size: 64px;
+                opacity: root.peer.connected || root.peer.is-self ? 1 : 0.5;
+            }
+        }
+        Text {
+            horizontal-alignment: center;
+            text: root.peer.is-self ? root.peer.name + " (you)" : root.peer.name;
+            color: Colors.text;
+            font-size: Type.body-strong-size;
+            font-weight: Type.body-strong-weight;
+            font-family: Type.family;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            alignment: center;
+            spacing: Space.xs;
+            if root.peer.is-self && root.peer.muted: Pill { text: "Muted"; icon: Icons.mic-off; tint: Colors.danger; }
+            if !root.peer.is-self && root.peer.path-kind != "": Pill {
+                text: root.peer.path-kind + " · " + root.peer.path-family;
+                icon: root.peer.path-kind == "LAN" ? Icons.lan : root.peer.path-kind == "Relayed" ? Icons.cloud : "";
+                tint: root.peer.path-kind == "Relayed" ? Colors.text-muted : root.peer.path-kind == "LAN" ? Colors.success : Colors.accent;
+            }
+            if !root.peer.is-self && root.peer.path-kind == "": Pill { text: "Connecting…"; }
+        }
+    }
+}
+
+component DeviceList inherits VerticalLayout {
+    in property <string> heading;
+    in property <[AudioDeviceItem]> items;
+    callback chosen(string);
+    spacing: Space.xxs;
+    Muted { text: root.heading; font-weight: 600; }
+    for d in root.items: Rectangle {
+        height: 40px;
+        border-radius: Radius.sm;
+        background: t.has-hover ? Colors.surface-raised : transparent;
+        HorizontalLayout {
+            padding-left: Space.sm;
+            padding-right: Space.sm;
+            spacing: Space.sm;
+            Rectangle {
+                width: 18px;
+                if d.selected: Icon { path: Icons.check; size: 18px; color: Colors.accent; }
+            }
+            Label { text: d.name; vertical-alignment: center; overflow: elide; }
+        }
+        t := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.chosen(d.id); }
+        }
+    }
+}
+
+export component CallScreen inherits Rectangle {
+    property <bool> devices-open;
+    background: Colors.bg;
+    property <length> drawer-w: App.drawer-open ? min(Size.drawer, root.width * 0.5) : 0px;
+
+    stage := Rectangle {
+        x: 0;
+        width: root.width - root.drawer-w;
+        animate width { duration: Motion.normal; easing: ease-out; }
+        // Header.
+        HorizontalLayout {
+            y: 0;
+            height: 88px;
+            padding: Space.xl;
+            spacing: Space.md;
+            VerticalLayout {
+                alignment: center;
+                spacing: Space.xxs;
+                Title { text: App.call-title; overflow: elide; }
+                Text {
+                    text: App.call-status;
+                    color: App.call-reconnecting ? Colors.danger : Colors.text-muted;
+                    font-size: Type.caption-size;
+                    font-family: Type.family;
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        // Tile grid (manual placement: tiles never resize when someone speaks).
+        grid := Rectangle {
+            property <length> gap: Space.lg;
+            property <int> n: App.peers.length;
+            property <int> cols: max(1, min(n, floor((self.width + gap) / (Size.tile + gap))));
+            property <int> rows: ceil(n / max(1, cols));
+            property <length> tile-w: min(260px, (self.width - (cols - 1) * gap) / cols);
+            property <length> tile-h: tile-w * 0.86;
+            property <length> total-w: cols * tile-w + (cols - 1) * gap;
+            property <length> total-h: rows * tile-h + (rows - 1) * gap;
+            x: Space.xl;
+            y: 88px;
+            width: parent.width - 2 * Space.xl;
+            height: parent.height - 88px - 112px;
+            for p[i] in App.peers: Tile {
+                x: (grid.width - grid.total-w) / 2 + mod(i, grid.cols) * (grid.tile-w + grid.gap);
+                y: max(0px, (grid.height - grid.total-h) / 2) + floor(i / grid.cols) * (grid.tile-h + grid.gap);
+                width: grid.tile-w;
+                height: grid.tile-h;
+                peer: p;
+            }
+        }
+        // Drop overlay while files hover over the window.
+        if App.file-hover: Rectangle {
+            x: Space.lg;
+            y: Space.lg;
+            width: parent.width - 2 * Space.lg;
+            height: parent.height - 2 * Space.lg;
+            border-radius: Radius.xl;
+            border-width: 2px;
+            border-color: Colors.accent;
+            background: Colors.accent.with-alpha(0.10);
+            VerticalLayout {
+                alignment: center;
+                spacing: Space.md;
+                HorizontalLayout {
+                    alignment: center;
+                    Icon { path: Icons.upload; size: 40px; color: Colors.accent; }
+                }
+                Text {
+                    horizontal-alignment: center;
+                    text: "Drop to send";
+                    color: Colors.text;
+                    font-size: Type.title-size;
+                    font-weight: Type.title-weight;
+                    font-family: Type.family;
+                }
+                Muted { horizontal-alignment: center; text: "You choose who receives it next."; }
+            }
+        }
+        // Control bar.
+        HorizontalLayout {
+            y: parent.height - 112px;
+            height: 112px;
+            alignment: center;
+            spacing: Space.lg;
+            padding: Space.xl;
+            RoundButton {
+                icon: App.muted ? Icons.mic-off : Icons.mic;
+                tip: App.muted ? "Unmute" : "Mute";
+                active: App.muted;
+                clicked => { App.toggle-mute(); }
+            }
+            RoundButton {
+                icon: Icons.speaker;
+                tip: "Audio devices";
+                active: root.devices-open;
+                clicked => {
+                    root.devices-open = !root.devices-open;
+                    if (root.devices-open) { App.refresh-devices(); }
+                }
+            }
+            RoundButton {
+                icon: Icons.chat;
+                tip: "Chat";
+                active: App.drawer-open;
+                badge: App.drawer-open ? 0 : App.unread;
+                clicked => {
+                    App.drawer-open = !App.drawer-open;
+                    if (App.drawer-open) { App.chat-shown(); }
+                }
+            }
+            RoundButton {
+                icon: Icons.upload;
+                tip: "Send a file";
+                clicked => { App.pick-files(); }
+            }
+            RoundButton {
+                icon: Icons.hangup;
+                tip: "Leave";
+                danger: true;
+                clicked => { App.leave(); }
+            }
+        }
+        // Device picker popover above the control bar.
+        if root.devices-open: Rectangle {
+            TouchArea { clicked => { root.devices-open = false; } }
+            Card {
+                width: min(380px, parent.width - 2 * Space.xl);
+                height: dev-col.preferred-height;
+                x: (parent.width - self.width) / 2;
+                y: parent.height - 112px - self.height - Space.sm;
+                drop-shadow-blur: 24px;
+                drop-shadow-color: #00000066;
+                TouchArea {}
+                dev-col := VerticalLayout {
+                    padding: Space.lg;
+                    spacing: Space.md;
+                    DeviceList {
+                        heading: "MICROPHONE";
+                        items: App.inputs;
+                        chosen(id) => { App.select-input(id); }
+                    }
+                    DeviceList {
+                        heading: "SPEAKER";
+                        items: App.outputs;
+                        chosen(id) => { App.select-output(id); }
+                    }
+                }
+            }
+        }
+    }
+
+    // Slide-in chat drawer.
+    drawer := ChatPanel {
+        x: root.width - root.drawer-w;
+        width: max(root.drawer-w, 1px);
+        visible: root.drawer-w > 0;
+        compact: true;
+        animate x { duration: Motion.normal; easing: ease-out; }
+        close => { App.drawer-open = false; }
+    }
+    Rectangle {
+        x: drawer.x - 1px;
+        width: 1px;
+        visible: drawer.visible;
+        background: Colors.border;
+    }
+}
