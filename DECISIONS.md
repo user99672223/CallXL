@@ -472,3 +472,23 @@ called workflow). `gui_join` runs in the `e2e loopback` leg, which already start
 PulseAudio. `scripts/ci-webrtc-cache.sh` is taken verbatim from `p2/desktop` (same
 `webrtc.lib` check plus `cygpath`; Git Bash on windows-latest has `unzip`, so my 7-Zip
 fallback was dropped).
+
+D-0048 (2026-11-07, p2/infra-qa) — CI speed, before/after (M5). Wall-clock of `ci.yml`
+on Linux (Windows/macOS jobs still no-ops on this branch):
+warm caches 10 m 27 s (run 42351643296, one serial job) → 3 m 41 s (run 42356464865:
+lint ∥ swift-bindgen ∥ worker ∥ build 1 m 57 s, then 4 e2e suites ∥ 6 netem scenarios,
+longest leg e2e loopback 1 m 36 s); cold caches 22 m 02 s (run 42352890429) → 7 m 48 s
+(run 42355062935, every per-job cache key new). Release dry-run end to end: 3 m 57 s
+(run 42356469404). Cost: runner time grows with the fan-out, 627 → 895 runner-seconds
+warm (17 jobs, each ~30–60 s of set-up), accepted for a 2.8× shorter feedback loop.
+What made it: (1) clippy and the build no longer run back to back (cold: 5 m 11 s +
+4 m 17 s serial); (2) the e2e/netem legs reuse one debug build via the `e2e-bins`
+artifact instead of compiling (upload ~10 s at compression level 1, download ~5 s);
+(3) the 6 m 52 s serial e2e became ≤ 1 m 36 s per leg; (4) sccache warm: Rust hit rate
+100 % (lint), 87.5 % (build), 85.7 % (bindgen). `CARGO_INCREMENTAL=0`,
+`CARGO_NET_RETRY=10` everywhere. `cargo nextest` rejected: the unit tests take 1 s in
+total (run 42356464865), so there is nothing for it to win and it would add an install
+step. Caches are keyed per job kind (`lint`, `build`, `package`, `bindgen`, `windows`,
+`macos`) and on the libwebrtc tag; tag builds read the default branch's caches, so the
+release runs warm once CI has run on the integration branch after the merge. The
+libwebrtc archive is fetched once per OS and cache key (8 s cold, 0 s warm).

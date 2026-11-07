@@ -72,28 +72,28 @@ Numbers are from the linked runs' logs/artifacts.
 
 | §14 item | Test(s) | Run | Key numbers |
 |---|---|---|---|
-| LAN policy over `127.0.0.1` (510 kbps, 10 ms) | `loopback_v4_lan_policy` | TODO(p2/infra-qa: ci run) | |
-| LAN policy over `::1` | `loopback_v6_lan_policy` | TODO | |
-| No audio gaps > 20 ms | `audio_continuity_no_gaps` | TODO | |
-| Internet 128 → 510 ramp | `netem_internet_ramp` (netem `internet_ramp`) | TODO | |
-| Back-off and recovery under loss | `netem_loss_backoff_recovery` | TODO | |
-| 10 → 20 → 10 ms frame adaptation | `netem_frame_adaptation` | TODO | |
-| Path switch IPv6 → IPv4 | `netem_path_switch_v6_to_v4` | TODO | |
-| Path switch IPv4 → IPv6 | `netem_path_switch_v4_to_v6` | TODO | |
-| File transfer keeps audio loss flat (internet path) | `file_transfer_throttle_keeps_audio_loss_flat` (netem `file_throttle`) | TODO | |
-| Chat, receipts | `chat_roundtrip` | TODO | |
-| Files: accept prompt, chosen recipients, resume, BLAKE3 check | `file_transfer_accept_resume_hash` | TODO | |
-| Trust flow, key change | `trust_flow_and_key_change` | TODO | |
-| Signed SDP, tampered SDP rejected | `tampered_sdp_rejected` | TODO | |
-| mDNS discovery, glare | `mdns_discovery_loopback`, `signaling_glare` | TODO | |
-| Cloud lobby/session/TURN-credential flow (local Worker) | `signaling_roundtrip_wrangler` + Worker vitest | TODO | |
-| Diagnostics: every §7 metric, export (schema v1) | `diagnostics_complete`, `export_schema_v1` | TODO | |
-| Platform ADM (PulseAudio null sink) | `loopback_v4_lan_policy` with `CALLXL_E2E_ADM=platform` | TODO | |
+| LAN policy over `127.0.0.1` (510 kbps, 10 ms) | `loopback_v4_lan_policy` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e loopback) | path `Lan/V4`, Opus target 452.4 kbps from the first sample (510 kbps BWE start − overhead), 510 kbps from t = 3 s, frame 10 ms; 0 gaps > 20 ms |
+| LAN policy over `::1` | `loopback_v6_lan_policy` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e loopback) | path `Lan/V6@::1`, target 436.4 → 510 kbps by t = 3 s, frame 10 ms; 0 gaps |
+| No audio gaps > 20 ms | `audio_continuity_no_gaps` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e loopback) | 18.6 s active audio each way, longest gap 0 ms, across live 510 → 64 → 510 kbps ceiling changes |
+| Internet 128 → 510 ramp | `netem_internet_ramp` (netem `internet_ramp`) | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) | 40 ms delay: BWE start 128 kbps, max send in first second 98.7 kbps, Opus target ≥ 450 kbps 16.0 s after media start; 0 gaps |
+| Back-off and recovery under loss | `netem_loss_backoff_recovery` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) | 5 % loss: 510 → 300.9 kbps within 10 s; ≥ 450 kbps 0.6 s after loss cleared; 0 gaps |
+| 10 → 20 → 10 ms frame adaptation | `netem_frame_adaptation` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) | 8 % loss on at 3.0 s → 20 ms at 10.0 s; loss off at 23.0 s → 10 ms at 46.0 s; done by libwebrtc's audio network adaptor; 0 gaps |
+| Path switch IPv6 → IPv4 | `netem_path_switch_v6_to_v4` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) | +60 ms on IPv6 → switch to IPv4 7.0 s later, exactly 1 switch; 0 gaps across the switch |
+| Path switch IPv4 → IPv6 | `netem_path_switch_v4_to_v6` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) | to IPv4 at 8.0 s, IPv6 cleared at 12.0 s, back on IPv6 at 38.0 s (30 s cooldown respected); 0 gaps |
+| File transfer keeps audio loss flat (internet path) | `file_transfer_throttle_keeps_audio_loss_flat` (netem `file_throttle`) | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) | 2 Mbit/s bottleneck: 4 MiB in 70 s (479 kbps goodput), audio loss 0.00 % both ways, audio send avg 281.4 kbps, throttle 87–934 kbps |
+| Chat, receipts | `chat_roundtrip` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e chat_files) | delivered + read receipts; history persisted across restart |
+| Files: accept prompt, chosen recipients, resume, BLAKE3 check | `file_transfer_accept_resume_hash` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e chat_files) | 20 MiB to 2 of 3 peers; nothing moves before accept; receiver killed at ~56 %, resumed from offset; BLAKE3 matches; non-recipient gets nothing |
+| Trust flow, key change | `trust_flow_and_key_change` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e signaling) | same 6-word phrase on both sides; after reinstall `key_changed: true` prompt |
+| Signed SDP, tampered SDP rejected | `tampered_sdp_rejected` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e signaling) | ciphertext / `fp` tampering: "the message signature is invalid"; forged fingerprint: "its DTLS fingerprint does not match the signed message" |
+| mDNS discovery, glare | `mdns_discovery_loopback`, `signaling_glare` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e signaling) | session seen over mDNS after 869 ms; glare resolves to one offer |
+| Cloud lobby/session/TURN-credential flow (local Worker) | `signaling_roundtrip_wrangler` + Worker vitest | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e signaling, worker) | call set up via `wrangler dev`; 0 gaps |
+| Diagnostics: every §7 metric, export (schema v1) | `diagnostics_complete`, `export_schema_v1` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e diagnostics, linux build) | all §7 fields live under 20 ms ± 5 ms / 2 % loss; export "schema v1 valid, 6472 bytes, 16 series" |
+| Platform ADM (PulseAudio null sink) | `loopback_v4_lan_policy` with `CALLXL_E2E_ADM=platform` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e loopback) | LAN policy held with the real PulseAudio device module |
 | Desktop launches < 1 s (Linux runner) | desktop `--headless-smoke` (`startup_ms`) | TODO(orchestrator, p2/desktop) | |
 | Windows build, loopback e2e, installer install/uninstall | `windows` job | TODO(orchestrator, p2/desktop) | |
 | iOS Simulator tests, xcframework, unsigned IPA | `macos` job | TODO(orchestrator, p2/ios) | |
-| Release from a clean tag with all three artifacts | `release.yml` | TODO(orchestrator) | |
-| Worker deploy workflow (no-secrets path) | `worker.yml` | TODO | |
+| Release from a clean tag with all three artifacts | `release.yml` | dry-run (no app packages yet): [42356469404](https://github.com/user99672223/CallXL/actions/runs/42356469404) → [v0.0.1-rc](https://github.com/user99672223/CallXL/releases/tag/v0.0.1-rc). **TODO(orchestrator):** v0.1.0 run | all gates green (3 builds, 6 netem legs) in 3 m 57 s |
+| Worker deploy workflow | `worker.yml` | deploy: [42355101376](https://github.com/user99672223/CallXL/actions/runs/42355101376); no-secrets path: [42355783034](https://github.com/user99672223/CallXL/actions/runs/42355783034) | deployed `https://callxl.hbadgujar44.workers.dev`, `/health` ok; without secrets: green, manual steps printed |
 
 Not provable in CI (no real network, no real devices): Wi-Fi LAN calls between
 machines, NAT traversal, real IPv6 internet paths, TURN relaying through Cloudflare,
