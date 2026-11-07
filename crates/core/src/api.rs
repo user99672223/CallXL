@@ -7,9 +7,10 @@ use std::time::Duration;
 
 use callxl_media::{AdmMode, EngineOptions, MediaEngine, NetworkFilter};
 use callxl_signal::{DeviceCard as Card, SignalCrypto};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::sync::{mpsc, oneshot, watch};
 
+use crate::diagnostics::export;
 use crate::engine::{Command, Core, DevOptions, start_lan};
 use crate::store::Store;
 use crate::types::*;
@@ -130,7 +131,6 @@ fn dispatch(listeners: &Listeners, e: &Event) {
 
 #[derive(uniffi::Object)]
 pub struct CallXl {
-    config: AppConfig,
     dev: DevOptions,
     store: Arc<Store>,
     crypto: Arc<SignalCrypto>,
@@ -190,7 +190,6 @@ impl CallXl {
             events: ev_tx,
         });
         Arc::new(Self {
-            config,
             dev,
             store,
             crypto,
@@ -504,33 +503,18 @@ impl CallXl {
         self.shared.diagnostics.read().unwrap().clone()
     }
 
-    /// JSON report (diagnostics + state + recent log lines); also written to the
-    /// download folder as `callxl-diagnostics-<ts>.json`.
+    /// Diagnostics report, schema v1 (docs/diagnostics-export.md): per-peer and global
+    /// §7 metrics, 60 s series and the redacted log tail, as pretty JSON. Also written to
+    /// the download folder as `CallXL-diagnostics-<ts>.json`.
     pub fn export_diagnostics(&self) -> String {
         let snap = self.snapshot();
-        let report = json!({
-            "app": "CallXL",
-            "version": env!("CARGO_PKG_VERSION"),
-            "generated_ms": callxl_signal::now_ms(),
-            "dev_app_secret": config::app_secret_is_dev(),
-            "data_dir": self.config.data_dir,
-            "diagnostics": self.diagnostics(),
-            "state": {
-                "device": snap.device,
-                "call_state": snap.call_state,
-                "current_session": snap.current_session,
-                "peers": snap.peers,
-                "sessions": snap.sessions,
-                "settings": snap.settings,
-                "transfers": snap.transfers,
-                "cloud_connected": snap.cloud_connected,
-            },
-            "log": logring::lines(),
-        });
+        let now = callxl_signal::now_ms();
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok();
+        let report = export::build(&snap, &self.diagnostics(), &logring::lines(), home.as_deref(), now);
         let text = serde_json::to_string_pretty(&report).unwrap_or_default();
         let dir = PathBuf::from(&snap.settings.download_dir);
         let _ = std::fs::create_dir_all(&dir);
-        let file = dir.join(format!("callxl-diagnostics-{}.json", callxl_signal::now_ms()));
+        let file = dir.join(export::file_name(now));
         if let Err(e) = std::fs::write(&file, &text) {
             tracing::warn!("could not write {}: {e}", file.display());
         }

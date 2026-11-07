@@ -1,0 +1,281 @@
+{
+  "global": {
+    "aec_delay_ms": 0,
+    "aec_erl_db": -29.54279899597168,
+    "aec_erle_db": 0.17551203072071075,
+    "ana_frame_ms": 10,
+    "ana_switches": 0,
+    "ana_uplink_loss_pct": 1.9,
+    "apm": {
+      "aec": true,
+      "agc": true,
+      "high_pass": true,
+      "noise_suppression": true,
+      "ns_level": "Moderate"
+    },
+    "downlink_kbps": 258.95630887126816,
+    "dropped_media_events": 0,
+    "frame_adaptation_mechanism": "libwebrtc audio network adaptor (CallXL loss-driven frame-length controller + libwebrtc BitrateController)",
+    "glare_events": 1,
+    "media_thread_cpu_pct": 4.999692678890415,
+    "rejected_signaling": 0,
+    "signaling_latency_ms": 0.773843,
+    "signaling_transport": "Lan",
+    "turn_bytes_month": 0,
+    "uplink_kbps": 246.27766464425923
+  },
+  "peers": [
+    {
+      "audio_level": 0.5663014618366039,
+      "available_outgoing_kbps": 243.776,
+      "channels": 1,
+      "clock_rate": 48000,
+      "codec": "audio/opus",
+      "concealment_events": 8,
+      "display_name": "bob",
+      "dtx_enabled": false,
+      "fec_enabled": true,
+      "file_rate_limit_kbps": 502.0,
+      "jitter_buffer_ms": 34.199999999999974,
+      "jitter_ms": 2.0,
+      "loss_pct": 0.9615384615384616,
+      "opus_bitrate_kbps": 198.976,
+      "opus_complexity": 10,
+      "opus_frame_ms": 10,
+      "opus_payload_kbps": 208.16973966162797,
+      "pair_switches": 0,
+      "path": {
+        "kind": "Direct",
+        "local_addr": "127.0.0.1:52898",
+        "local_candidate_type": "prflx",
+        "local_family": "V4",
+        "remote_addr": "127.0.0.1:60944",
+        "remote_candidate_type": "host",
+        "remote_family": "V4",
+        "switches": 0
+      },
+      "peer_key": "ce014b40c73a2659db8a37103ac32de163e8e6064b404420cf5387d5faf54283",
+      "recv_kbps": 243.7739323773483,
+      "remote_loss_pct": 1.953125,
+      "rtt_ms": 50.0,
+      "send_kbps": 230.56734460523995
+    }
+  ],
+  "series": [
+    {
+      "metric": "ana_frame_ms",
+      "values": [
+        0.0,
+        10.0,
+        10.0,
+        10.0,
+        10.0,
+        10.0,
+        10.0,
+        10.0,
+        10.0
+      ]
+    },
+    {
+      "metric": "ana_switches",
+      "values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "metric": "concealment_events:ce014b40",
+      "values": [
+        0.0,
+        6.0,
+        6.0,
+        7.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    {
+      "metric": "downlink_kbps",
+      "values": [
+        0.0,
+        0.0,
+        127.59006115387056,
+        167.95039008739778,
+        190.5910660437792,
+        182.9428718094855,
+        203.08939914977503,
+        241.69442790937845,
+        258.95630887126816
+      ]
+    },
+    {
+      "metric": "jitter_buffer_ms:ce014b40",
+      "values": [
+        0.0,
+        35.104166666666664,
+        33.6,
+        33.232323232323225,
+        33.43434343434344,
+        33.19999999999999,
+        32.10000000000002,
+        34.199999999999974
+      ]
+    },
+    {
+      "metric": "jitter_ms:ce014b40",
+      "values": [
+        2.0,
+        4.0,
+        3.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    {
+      "metric": "loss_pct:ce014b40",
+      "values": [
+        0.0,
+        5.882352941176471,
+        0.0,
+        0.8333333333333334,
+        1.0,
+        1.0,
+        1.7857142857142858,
+        0.9615384615384616
+      ]
+    },
+    {
+      "metric": "media_thread_cpu_pct",
+      "values": [
+        0.0,
+        2.9990847603064426,
+        4.998864253042845,
+        7.003331428733998,
+        7.998435018205902,
+        6.995943129534559,
+        5.002197150069605,
+        7.002904412587695,
+        4.999692678890415
+      ]
+    },
+    {
+      "metric": "opus_bitrate_kbps:ce014b40",
+      "values": [
+        103.15,
+        87.176,
+        140.672,
+        154.278,
+        176.156,
+        191.156,
+        198.583,
+        198.976
+      ]
+    },
+    {
+      "metric": "opus_frame_ms:ce014b40",
+      "values": [
+        10.0,
+        10.0,
+        10.0,
+        10.0,
+        10.0,
+        10.0,
+        10.0,
+        10.0
+      ]
+    },
+    {
+      "metric": "pair_switches:ce014b40",
+      "values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "metric": "recv_kbps:ce014b40",
+      "values": [
+        0.0,
+        113.53244473944936,
+        151.31704195082295,
+        174.54381825851914,
+        168.42448456978678,
+        187.8845028464977,
+        225.0462704748152,
+        243.7739323773483
+      ]
+    },
+    {
+      "metric": "rtt_ms:ce014b40",
+      "values": [
+        48.0,
+        48.0,
+        49.0,
+        50.0,
+        46.0,
+        42.0,
+        47.0,
+        50.0
+      ]
+    },
+    {
+      "metric": "send_kbps:ce014b40",
+      "values": [
+        0.0,
+        129.23731313417247,
+        165.04475708760148,
+        179.19160039373156,
+        188.58713469011727,
+        209.13134478607736,
+        223.48550571532488,
+        230.56734460523995
+      ]
+    },
+    {
+      "metric": "signaling_latency_ms",
+      "values": [
+        0.0,
+        1.097874,
+        0.721727,
+        0.726886,
+        1.0823619999999998,
+        0.838873,
+        0.822006,
+        1.255661,
+        0.773843
+      ]
+    },
+    {
+      "metric": "uplink_kbps",
+      "values": [
+        0.0,
+        0.0,
+        143.99861000619836,
+        182.12635714700983,
+        194.64687592769087,
+        203.52124667456508,
+        224.97644724949268,
+        238.00461993950648,
+        246.27766464425923
+      ]
+    }
+  ],
+  "ts_ms": 1794038131643
+}

@@ -2,6 +2,9 @@
 //! collects events, samples diagnostics, and stores logs/recordings/stats as artifacts.
 
 pub mod audio;
+/// The core's diagnostics-export validator, shared as source (no dependency on the core).
+#[path = "../../../crates/core/src/diagnostics/schema_v1.rs"]
+pub mod diag_schema;
 pub mod mitm;
 pub mod netem;
 pub mod worker;
