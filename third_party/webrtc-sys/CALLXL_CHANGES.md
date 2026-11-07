@@ -41,3 +41,7 @@ taken, so the CallXL factory is `create_callxl_peer_connection_factory`.
 applies the requested APM config directly (`callxl_apply_apm`): the voice engine
 re-applies the source options on every send-stream reconfiguration (each renegotiation)
 and otherwise resets the live APM config (DECISIONS.md D-0024).
+
+`callxl_test_adm.cpp` builds on Windows (MSVC): the 10 ms tick uses QueryPerformanceCounter
+and a high-resolution waitable timer there, `clock_nanosleep(CLOCK_MONOTONIC)` elsewhere
+(DECISIONS.md D-0061).

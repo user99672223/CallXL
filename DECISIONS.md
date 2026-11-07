@@ -645,3 +645,14 @@ D-0060 (2026-11-07, p2/desktop) — `callxl --headless-smoke` (§14 "launches un
 live (first event-loop turn after `show()`) and `CallXl::start` has returned (media engine,
 LAN listener, mDNS). It uses a throw-away profile so CI never creates a real identity.
 Local debug build under `xvfb-run`: `startup_ms=494`.
+
+D-0061 (2026-11-07, p2/desktop) — Windows CI findings. (1) `CC=cl.exe` without a developer
+prompt fails ("failed to find tool cl.exe"); with `ilammy/msvc-dev-cmd` (vcvars) Git
+Bash's `/usr/bin/link` shadows MSVC's `link.exe` ("/usr/bin/link: extra operand"). The
+windows job therefore sets no CC/CXX and no vcvars: cc-rs and rustc locate MSVC through
+the VS installation (runs 42355869460, 42356690342). The workflow-level `CC=clang-21` moved
+into the linux job. (2) The fork's test ADM used POSIX `clock_gettime`/`clock_nanosleep`
+(MSVC: "C2065 CLOCK_MONOTONIC undeclared", run 42357923913); on Windows it now uses
+QueryPerformanceCounter and a high-resolution waitable timer (≈0.5 ms wake-up; plain
+`Sleep` rounds to the 15.6 ms quantum, which would break 10 ms ticks). Linux keeps the
+`clock_nanosleep` path unchanged (third_party/webrtc-sys/CALLXL_CHANGES.md).
