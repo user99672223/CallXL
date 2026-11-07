@@ -15,7 +15,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     TARGETED_DEVICE_FAMILY: "1"
-    # The core has no x86_64 simulator slice (DECISIONS.md D-0039).
+    # The core has no x86_64 simulator slice (DECISIONS.md D-0100).
     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
     ENABLE_USER_SCRIPT_SANDBOXING: "NO"
   configs:

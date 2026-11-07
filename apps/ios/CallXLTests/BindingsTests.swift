@@ -78,7 +78,15 @@ final class BindingsTests: XCTestCase {
         let report = core.exportDiagnostics()
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(report.utf8)) as? [String: Any])
         XCTAssertEqual(json["app"] as? String, "CallXL")
-        XCTAssertNotNil(json["diagnostics"])
+        // Diagnostics export schema v1 (docs/diagnostics-export.md, p2/infra-qa PR #2).
+        // Until that PR is merged this branch's core still writes the pre-v1 shape;
+        // drop the else branch afterwards.
+        if json["schema"] != nil {
+            XCTAssertEqual(json["schema"] as? Int, 1)
+            XCTAssertNotNil(json["global"])
+        } else {
+            XCTAssertNotNil(json["diagnostics"])
+        }
 
         let t2 = Date()
         try offMain { core.stop() }

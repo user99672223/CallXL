@@ -220,6 +220,7 @@ final class FakeCore: CallXlProtocol, @unchecked Sendable {
     func cancelTransfer(id _: String) {}
 
     func exportDiagnostics() -> String {
-        #"{"app":"CallXL","fake":true}"#
+        // Same top-level shape as the core's schema v1 export.
+        #"{"schema":1,"app":"CallXL","call":null,"peers":[],"global":{},"series":[],"log_tail":[],"fake":true}"#
     }
 }
