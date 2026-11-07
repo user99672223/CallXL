@@ -45,30 +45,6 @@ enum LaunchMode {
     }
 }
 
-/// Milliseconds since this process started (kernel start time), for the §1.5 launch check.
-enum LaunchClock {
-    private static var marks: [String] = []
-
-    /// Records a launch phase (main thread only, launch only).
-    static func mark(_ name: String) {
-        marks.append("\(name)=\(Int(msSinceProcessStart()))")
-    }
-
-    static var breakdown: String {
-        marks.joined(separator: " ")
-    }
-
-    static func msSinceProcessStart() -> Double {
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
-        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return -1 }
-        let start = info.kp_proc.p_un.__p_starttime
-        let startS = Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
-        return (Date().timeIntervalSince1970 - startS) * 1000
-    }
-}
-
 @main
 struct CallXLApp: App {
     @StateObject private var model: AppModel

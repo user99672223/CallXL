@@ -58,9 +58,7 @@ struct HomeView: View {
                 let ms = LaunchClock.msSinceProcessStart()
                 launchMs = ms
                 if LaunchMode.reportLaunch {
-                    // Read by CI after `simctl launch` (launch time without XCUITest).
-                    let line = String(format: "%.0f %@\n", ms, LaunchClock.breakdown)
-                    try? line.write(to: AppPaths.documents.appendingPathComponent("launch.txt"), atomically: true, encoding: .utf8)
+                    LaunchClock.writeReport(ms) // read by CI after `simctl launch`
                 }
                 AppModel.log.info("launch-to-home-ms: \(ms, privacy: .public)")
             }

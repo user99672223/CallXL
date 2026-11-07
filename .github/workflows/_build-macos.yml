@@ -166,7 +166,12 @@ jobs:
       - name: Launch to Home < 1 s (Release build, simctl launch, real core)
         if: steps.present.outputs.ok == 'true'
         timeout-minutes: 10
-        run: packaging/ios/measure-launch.sh "$SIM_UDID" target/ios/DerivedData-test/Build/Products/Release-iphonesimulator/CallXL.app
+        run: |
+          set -euo pipefail
+          P=target/ios/DerivedData-test/Build/Products/Release-iphonesimulator
+          # The Simulator's floor first (bare SwiftUI app, same clock), then CallXL.
+          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/LaunchBaseline.app" --report-only
+          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/CallXL.app"
 
       - name: Unsigned IPA
         id: ipa

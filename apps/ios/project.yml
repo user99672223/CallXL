@@ -31,6 +31,7 @@ targets:
     platform: iOS
     sources:
       - path: CallXL
+      - path: Shared
       - path: ../../design/fonts/Inter-Regular.ttf
         group: CallXL/Resources
         buildPhase: resources
@@ -48,6 +49,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.callxl.app
         PRODUCT_NAME: CallXL
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/Bridging-Header.h
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: CallXL/Info.plist
@@ -80,6 +82,22 @@ targets:
           - Inter-Regular.ttf
           - Inter-SemiBold.ttf
         ITSAppUsesNonExemptEncryption: false
+  # Launch-time floor of the Simulator: a bare SwiftUI app with the same launch marks
+  # (measured next to CallXL by packaging/ios/measure-launch.sh; never shipped).
+  LaunchBaseline:
+    type: application
+    platform: iOS
+    sources:
+      - path: LaunchBaseline
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.callxl.launchbaseline
+        PRODUCT_NAME: LaunchBaseline
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/Bridging-Header.h
+        CODE_SIGN_STYLE: Automatic
   CallXLTests:
     type: bundle.unit-test
     platform: iOS
@@ -124,6 +142,7 @@ schemes:
     build:
       targets:
         CallXL: all
+        LaunchBaseline: all
         CallXLUITests: [test]
     test:
       config: Release
