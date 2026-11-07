@@ -109,6 +109,8 @@ pub struct Link {
     pub remote_hosts: Vec<(String, u16)>,
     /// Last selected pair as reported by libwebrtc (for reclassification).
     pub selected: Option<(callxl_media::CandidateInfo, callxl_media::CandidateInfo)>,
+    /// Bumped on every path-policy application (stale timers check it).
+    pub policy_generation: u64,
 }
 
 impl Link {
@@ -263,6 +265,7 @@ impl Core {
             throttle: Throttle::new(),
             remote_hosts: Vec::new(),
             selected: None,
+            policy_generation: 0,
         };
         self.peer_ids.insert(id, key.to_string());
         let info = self.peer_info(&link);
@@ -548,7 +551,9 @@ impl Core {
 
     pub fn apply_path_policy(&mut self, key: &str) {
         let ceiling = self.settings.bitrate_ceiling_kbps;
-        let Some(l) = self.links.get(key) else { return };
+        let Some(l) = self.links.get_mut(key) else { return };
+        l.policy_generation += 1;
+        let l = &*l;
         let Some(kind) = l.path_kind else { return };
         let p = policy::policy_for(kind, ceiling);
         self.engine.set_max_opus_bitrate((ceiling * 1000) as i32);
@@ -567,6 +572,31 @@ impl Core {
             p.bwe_max_bps / 1000,
             p.jitter_buffer_min_delay
         );
+        if kind == MPathKind::Lan {
+            // SetBitrate is applied asynchronously on libwebrtc's worker thread; when the
+            // transport becomes writable first, the initial probe runs at the creation
+            // start (128 kbps) and its result overwrites the delay-based estimate, so the
+            // LAN call ramps from ~100 kbps instead of starting at 510 (DECISIONS.md
+            // D-0029). Re-issuing the start once that probe is over fixes the estimate.
+            let (tx, key, generation) = (self.internal_tx.clone(), key.to_string(), l.policy_generation);
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let _ = tx.send(Internal::ReassertLanStart { key, generation });
+            });
+        }
+    }
+
+    pub fn reassert_lan_start(&mut self, key: &str, generation: u64) {
+        let ceiling = self.settings.bitrate_ceiling_kbps;
+        let Some(l) = self.links.get(key) else { return };
+        if l.policy_generation != generation || l.path_kind != Some(MPathKind::Lan) {
+            return;
+        }
+        let p = policy::policy_for(MPathKind::Lan, ceiling);
+        if let Err(e) = l.pc.set_bitrate(p.bwe_min_bps, Some(p.bwe_start_bps), p.bwe_max_bps) {
+            tracing::warn!("set_bitrate: {e}");
+        }
+        tracing::info!("path policy {} -> Lan: start {} kbps re-asserted", short(key), p.bwe_start_bps / 1000);
     }
 
     pub async fn on_media(&mut self, ev: MediaEvent) {

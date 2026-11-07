@@ -218,3 +218,28 @@ fetch handler and the two Durable Object classes; tokens/TURN/envelope helpers m
 vitest (which imports the module directly) did not. The e2e harness gets the CLI's
 build-time APP_SECRET through `debug app_secret` (the value is in the binary anyway) and
 starts the local Worker with it, so the test works with a random dev secret too.
+
+D-0029 (2026-11-07, phase1) — LAN start rate re-asserted 300 ms after the LAN path policy
+is applied. `SetBitrate` runs asynchronously on libwebrtc's worker thread; when the
+transport becomes writable first (loopback/LAN: DTLS completes within ~1 ms of ICE
+selection, and the peer's check often precedes its trickled host candidate, D-0018),
+the initial probe runs at the creation start (128 kbps, D-0022) and its result overwrites
+the delay-based estimate (AimdRateControl::SetEstimate), so the LAN call ramped from
+~100 kbps. Evidence: CI run 42343155949 `loopback_v6_lan_policy` bob Opus target
+88→244 kbps over 8 s (failed); local `loopback_v4_lan_policy` alice 98, 118, 413, 426,
+510 kbps (passed only because it asserted at 8 s). After the fix 3/3 local runs, both
+sides: 452, 452, 510, 510… (452 = 510 kbps BWE start − overhead). The loopback tests now
+assert every sample since media start is ≥ 450 kbps (§3 "510 kbps immediately").
+Re-issuing the start with an unchanged max triggers no probe; internet paths unaffected.
+
+D-0030 (2026-11-07, phase1) — The `tc` netem backend impairs UDP only (u32 filters on the
+IP protocol / IPv6 next-header field steer UDP of the chosen family into the netem band;
+TCP stays in the clean default band). With netem on the whole of `lo`, the 2 Mbit/s cap of
+`file_transfer_throttle_keeps_audio_loss_flat` also throttled the harness's control
+sockets and LAN signaling (TCP, loopback segments up to 64 KB = 256 ms at 2 Mbit/s): CI
+run 42343155949 showed 18–24 % audio loss and 122 ms RTT 1.4 s into the call before any
+file data moved, then audio at 9.6 kbps while the file throttle sat at its 64 kbps floor.
+That measured the harness, not CallXL. The proxy backend has always impaired only the
+media's UDP, so both backends now emulate the same thing. Also: CI uses Node 22, which
+current wrangler requires (`wrangler dev` refused to start under Node 20 in that run;
+vitest alone still worked).
