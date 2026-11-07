@@ -16,6 +16,20 @@ Audio is Opus mono 48 kHz, up to 510 kbps with 10 ms frames, reached adaptively.
 Release artifacts (GitHub Release of the tag, built by `.github/workflows/release.yml`):
 `CallXL-Setup.exe`, `callxl_<ver>_amd64.deb`, `CallXL-unsigned.ipa`, `SHA256SUMS.txt`.
 
+**Cutting a release (no local tag push needed).** This environment's git proxy refuses
+tag pushes, and none is required: GitHub → Actions → **release** → *Run workflow* →
+branch `claude/new-session-opnv54` (or `main`) → `tag` = `v0.1.0` → leave
+`allow_partial` unchecked → Run. (Same via the API: `workflow_dispatch` of `release.yml`
+with `{"tag": "v0.1.0"}`.) The workflow checks that the tag matches the app version
+(`scripts/check-version.sh`; a `-rc` tag stamps its version instead), builds and tests all
+three platforms, runs the netem gate, then `softprops/action-gh-release` **creates the tag
+at the dispatched commit** (`tag_name` = the input, `target_commitish` = that commit) and
+the Release with the three files and `SHA256SUMS.txt`. A tag created this way by the
+workflow token does not start the `push: tags` trigger again. Pushing a `v*` tag from a
+normal git client also works and runs the same workflow. Example: prerelease
+[v0.0.1-rc](https://github.com/user99672223/CallXL/releases/tag/v0.0.1-rc), cut by
+dispatch in run [42356469404](https://github.com/user99672223/CallXL/actions/runs/42356469404).
+
 **TODO(orchestrator):** link the v0.1.0 Release here.
 
 ## 2. Install

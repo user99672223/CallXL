@@ -523,3 +523,11 @@ D-0085 (2026-11-07, p2/infra-qa) — Additional baseline (D-0081 table): the int
 branch's first `ci.yml` run after the PR #1 merge (run 42357082797, d293752, old single
 serial `linux` job, no warm cache on that branch) took 19 m 51 s; the same code on the
 fanned-out layout ran cold in 7 m 48 s and warm in 3 m 41 s (D-0081).
+
+D-0086 (2026-11-07, p2/infra-qa) — Releases are cut by `workflow_dispatch` of
+`release.yml` with `tag` (Actions UI or API) as the primary path, since tag pushes are
+refused here (D-0079): `meta` takes the tag from the input, `softprops/action-gh-release`
+creates the tag at `github.sha` (the dispatched commit) together with the Release. Proven
+by v0.0.1-rc (run 42356469404, tag created at 5834802 with no local tag). Tags created
+with the workflow's `GITHUB_TOKEN` do not trigger other workflows, so the `push: tags`
+path does not run a second time. Documented in HANDOFF.md §1.
