@@ -143,7 +143,8 @@ jobs:
           wav="$(ls target/e2e-artifacts/assets/*.wav | head -1)"
           ( while true; do paplay -d callxl_null "$wav" || break; done ) &
           player=$!
-          apps/desktop/tests/gui_join.sh target/debug/callxl target/debug/callxl-cli
+          mkdir -p target/desktop-metrics
+          apps/desktop/tests/gui_join.sh target/debug/callxl target/debug/callxl-cli | tee target/desktop-metrics/gui_join.txt
           kill "$player" || true
 
       - uses: taiki-e/install-action@v2
@@ -153,12 +154,14 @@ jobs:
       - name: Desktop release build (fat LTO), .deb, install, startup under 1 s
         run: |
           set -euo pipefail
+          mkdir -p target/desktop-metrics
+          M=target/desktop-metrics/linux.txt
           t0=$(date +%s)
           cargo build --release -p callxl-desktop
-          echo "release build: $(( $(date +%s) - t0 )) s"
+          echo "release build: $(( $(date +%s) - t0 )) s" | tee -a "$M"
           cargo deb -p callxl-desktop --no-build
           deb="$(ls target/debian/callxl_*_amd64.deb)"
-          echo "binary: $(stat -c %s target/release/callxl) bytes; package: $(stat -c %s "$deb") bytes ($deb)"
+          echo "binary: $(stat -c %s target/release/callxl) bytes; package: $(stat -c %s "$deb") bytes ($deb)" | tee -a "$M"
           dpkg -I "$deb"
           dpkg -c "$deb"
           sudo apt-get install -y -q "./$deb"
@@ -170,7 +173,7 @@ jobs:
           # start to: window shown + core started). Three launches: cold, then warm.
           for i in 1 2 3; do
             out="$(xvfb-run -a callxl --headless-smoke 2>/dev/null)"
-            echo "$out"
+            echo "$out" | tee -a "$M"
             ms="$(echo "$out" | sed -n 's/^startup_ms=//p')"
             echo "$out" | grep -qx ready
             test -n "$ms" && test "$ms" -lt 1000
@@ -182,6 +185,14 @@ jobs:
           name: callxl-deb
           path: target/debian/callxl_*_amd64.deb
           if-no-files-found: error
+
+      - name: Upload desktop metrics (linux)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-metrics-linux
+          path: target/desktop-metrics
+          if-no-files-found: warn
 
       - name: Upload desktop screenshots
         if: always()
@@ -259,11 +270,15 @@ jobs:
 
       - name: Release build (static CRT, fat LTO)
         run: |
+          mkdir -p target/desktop-metrics
+          M=target/desktop-metrics/windows.txt
           t0=$(date +%s)
           cargo build --release -p callxl-desktop
-          echo "release build: $(( $(date +%s) - t0 )) s"
-          ls -l target/release/callxl.exe
-          target/release/callxl.exe --version
+          echo "release build: $(( $(date +%s) - t0 )) s" | tee -a "$M"
+          echo "callxl.exe: $(stat -c %s target/release/callxl.exe) bytes" | tee -a "$M"
+          target/release/callxl.exe --version | tee -a "$M"
+          # Informational (the §14 1 s check is the Linux job's): GUI start on the runner's desktop.
+          (timeout 60 target/release/callxl.exe --headless-smoke 2>&1 || echo "headless smoke exit $?") | tee -a "$M"
           # Static CRT: no vcruntime/msvcp import.
           if command -v dumpbin >/dev/null; then dumpbin //dependents target/release/callxl.exe; fi
 
@@ -278,6 +293,7 @@ jobs:
           "$ISCC" //Qp "//DAppVersion=$ver" "//DBinDir=$(cygpath -w "$PWD/target/release")" \
             "//DOutDir=$(cygpath -w "$PWD/target/installer")" packaging/windows/callxl.iss
           ls -l target/installer/CallXL-Setup.exe
+          echo "CallXL-Setup.exe: $(stat -c %s target/installer/CallXL-Setup.exe) bytes" | tee -a target/desktop-metrics/windows.txt
 
       - name: Silent install / launch / uninstall smoke test
         run: |
@@ -297,6 +313,7 @@ jobs:
           if [[ -e "$app" ]]; then echo "install folder still present"; ls -la "$app"; exit 1; fi
           [[ ! -e "$lnk" ]] || { echo "shortcut left behind"; exit 1; }
           echo "uninstalled cleanly"
+          echo "silent install -> $app/callxl.exe ($v), Start menu shortcut, silent uninstall removed both" >> target/desktop-metrics/windows.txt
 
       - name: Upload CallXL-Setup.exe
         uses: actions/upload-artifact@v4
@@ -304,6 +321,14 @@ jobs:
           name: CallXL-Setup
           path: target/installer/CallXL-Setup.exe
           if-no-files-found: error
+
+      - name: Upload desktop metrics (windows)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-metrics-windows
+          path: target/desktop-metrics
+          if-no-files-found: warn
 
       - name: Upload Windows e2e logs
         if: always()
