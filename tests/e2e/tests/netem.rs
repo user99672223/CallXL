@@ -267,8 +267,9 @@ async fn netem_path_switch_v4_to_v6() -> Result<()> {
             back - first
         );
     } else {
-        // No earlier switch: only the 5 s sustain (+ RTT smoothing) applies.
-        ensure!(back - cleared <= 15.0, "took {:.1} s to return to the clean IPv6 path", back - cleared);
+        // No earlier switch: libwebrtc's RTT smoothing (3/4 old + 1/4 new, ~1 backup
+        // sample/s: 120 ms falls under the 5 ms IPv6 bonus after ~11 s) + the 5 s sustain.
+        ensure!(back - cleared <= 25.0, "took {:.1} s to return to the clean IPv6 path", back - cleared);
     }
     ensure!(last["pair_switches"] == n0 + 1, "flapping: {} switches", last["pair_switches"]);
     ensure!(last["path"]["local_family"] == "V6", "not back on IPv6: {}", last["path"]);

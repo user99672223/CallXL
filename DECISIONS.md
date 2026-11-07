@@ -274,6 +274,7 @@ while IPv6 is degraded: libwebrtc may select IPv4 during the initial grace perio
 (its checks answer 120 ms sooner; CI run 42346908543: on IPv4 from t = 1 s, 0 switches)
 or start on IPv6 and the CallXL policy moves it (CI run 42345699737: switch at 7 s). The
 asserted behaviour is the mirror move: after IPv6 clears the call returns to IPv6
-exactly once (prefer-IPv6 rule), not inside 30 s of an earlier switch, within 15 s when
-there was none, and does not flap. Choosing IPv4 straight away for a degraded IPv6 path
+exactly once (prefer-IPv6 rule), not inside 30 s of an earlier switch, within 25 s when
+there was none (libwebrtc's RTT smoothing needs ~11 one-per-second backup samples to bring
+120 ms under the 5 ms IPv6 bonus, then the 5 s sustain; CI trace in run 42346908543), and does not flap. Choosing IPv4 straight away for a degraded IPv6 path
 is the better outcome for the user (no switch at all).
