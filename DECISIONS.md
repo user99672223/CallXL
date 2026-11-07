@@ -703,6 +703,8 @@ the in-crate `uniffi-bindgen` bin would need a host (macOS) build of callxl-core
 libwebrtc; it reads the metadata from the unstripped device dylib, which is then
 `strip -x`'d. `uniffi.toml` `ffi_module_name` = `CallXLCore` (was `CallXLCoreFFI`) so the
 generated Swift imports the framework module; header/modulemap file names are unchanged.
+Sizes (run 42373009146): CallXLCore.xcframework.zip 15.3 MB; device dylib 15.6 MB;
+CallXL-unsigned.ipa 8.3 MB (app binary 2.0 MB).
 
 D-0101 (2026-11-07, p2/ios) — LAN discovery on Apple targets uses the system DNS-SD API
 (`dns_sd.h`: DNSServiceRegister/Browse/Resolve/GetAddrInfo, `crates/lan/src/dnssd.rs`)
@@ -737,6 +739,23 @@ refuses the transaction the app joins anyway and activates the session itself. F
 sending uses the system document picker (Files, iCloud, other providers) with a recipient
 picker, not a Share Extension (a second process with its own IPC to the running core);
 picked files stay security-scoped until the transfer ends, so nothing is copied.
+
+D-0104 (2026-11-07, p2/ios) — CallXLCore.framework link-time trimming, each change with its
+measured effect: (1) `-Wl,-dead_strip_dylibs`: dependent libraries 23 → 18 (OpenGLES, GLKit,
+CoreAudio, libiconv, … were linked by webrtc-sys's iOS list but unused). (2) No `-ObjC`:
+it force-loaded all 147 Objective-C classes of libwebrtc (every video codec, Metal renderer,
+camera capture). Only the 7 category objects whose classes are linked are linked
+explicitly (`OBJC_CATEGORY_OBJECTS` in build-xcframework.sh); a missing one is caught by
+BindingsTests (run 42366443719 crashed in start() with `-[RTCVideoCodecInfo
+initWithNativeSdpVideoFormat:]: unrecognized selector` until the video-codec categories
+were added). (3) iOS-only empty video codec factories in the CallXL factory (audio-only
+app, §15): dependent libraries 18 → 13 (Metal, MetalKit, QuartzCore, CoreGraphics, Network
+gone), device dylib 16 154 504 → 15 570 568 bytes. Launch effect, measured in one job
+(run 42373009146, simctl, Release, warm medians): bare SwiftUI app 410 ms; + CallXLCore
+linked but never called 729 ms; + Charts/CallKit/AVKit 620 ms; CallXL 951 ms (gate
+< 1000 ms passed). Across runs the same bare app measured 410–746 ms and CallXL
+951–1583 ms, so the gate is sensitive to the runner's speed; on a real iPhone it is a
+HANDOFF item. Remaining premain cost is dyld loading the 15.6 MB dylib itself.
 
 D-0105 (2026-11-07, p2/ios) — The iOS app creates and starts the Rust core off the main
 actor (`AppModel.start()`: `CallXl(config:)` opens SQLite and the keychain, `start()`
