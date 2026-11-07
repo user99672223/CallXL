@@ -1,0 +1,165 @@
+# worker — deploys the CallXL signaling Worker (infra/worker) to Cloudflare.
+#
+# Triggers: push touching infra/worker/** or this file (any branch), manual workflow_dispatch.
+# Produces: always a validated bundle (`wrangler deploy --dry-run`, needs no credentials).
+#           On the integration branch / main or a manual dispatch, and only when the
+#           repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID exist: a
+#           deployed Worker `callxl` with APP_SECRET and TOKEN_SIGNING_KEY set, smoke-tested
+#           on /health, and its signaling URL printed (log + job summary).
+# Without those secrets the job prints the manual set-up steps and is green.
+# Secrets are only passed through env / stdin, never echoed.
+name: worker
+
+on:
+  push:
+    paths:
+      - "infra/worker/**"
+      - ".github/workflows/worker.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: worker-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra/worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide (secrets present? deploying ref?)
+        id: mode
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/claude/new-session-opnv54' || github.ref == 'refs/heads/main' }}
+        run: |
+          if [[ -z "$CF_TOKEN" || -z "$CF_ACCOUNT" ]]; then mode=skip
+          elif [[ "$DEPLOY_REF" == "true" ]]; then mode=deploy
+          else mode=dryrun; fi
+          echo "mode=$mode" | tee -a "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: infra/worker/package-lock.json
+
+      - name: npm ci + Worker tests
+        run: |
+          npm ci
+          npm test
+
+      - name: Bundle check (wrangler deploy --dry-run, no credentials needed)
+        run: npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/worker-dist"
+
+      - name: Not configured — print the manual steps (no deploy)
+        if: steps.mode.outputs.mode == 'skip'
+        run: |
+          steps=$(cat <<'EOF'
+          CallXL Worker NOT deployed: the repository secrets CLOUDFLARE_API_TOKEN and/or
+          CLOUDFLARE_ACCOUNT_ID are not set. This is not an error. To enable deployment:
+
+          1. Cloudflare dashboard -> My Profile -> API Tokens -> Create Token ->
+             "Create Custom Token" with these permissions:
+               Account | Workers Scripts  | Edit
+               Account | Account Settings | Read
+             Account Resources: Include -> your account. Create, copy the token.
+          2. Your account ID: Cloudflare dashboard -> Workers & Pages -> Overview ->
+             right-hand sidebar "Account ID".
+          3. GitHub -> this repository -> Settings -> Secrets and variables -> Actions ->
+             New repository secret, three times:
+               CLOUDFLARE_API_TOKEN   = the token from step 1
+               CLOUDFLARE_ACCOUNT_ID  = the ID from step 2
+               APP_SECRET             = a long random string, e.g. `openssl rand -hex 32`
+                                        (release.yml bakes the same value into the apps)
+          4. Actions -> worker -> Run workflow (or push a change under infra/worker/ to the
+             integration branch). The job deploys, sets APP_SECRET and a generated
+             TOKEN_SIGNING_KEY on the Worker, and prints the signaling URL
+             wss://callxl.<your-subdomain>.workers.dev/ws
+          5. Put that URL into crates/core/src/config.rs DEFAULT_SIGNALING_URL (then tag a
+             release), or enter it in the app under Settings -> Signaling URL.
+          Optional TURN relay: also add TURN_KEY_ID and TURN_API_TOKEN (Cloudflare
+          dashboard -> Calls -> TURN keys -> Create); without them peers that cannot
+          connect directly have no relay.
+          EOF
+          )
+          echo "$steps"
+          { echo '## CallXL Worker: not deployed (secrets missing)'; echo; echo '```'; echo "$steps"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Secrets present on a non-deploying branch
+        if: steps.mode.outputs.mode == 'dryrun'
+        run: echo "Bundle validated; deploys happen from the integration branch, main, or a manual dispatch."
+
+      - name: wrangler deploy
+        id: deploy
+        if: steps.mode.outputs.mode == 'deploy'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler deploy 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+          url="$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -1 || true)"
+          if [[ -z "$url" ]]; then
+            echo "::warning::wrangler printed no *.workers.dev URL (workers.dev subdomain disabled or custom route only)"
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # `wrangler secret put` overwrites idempotently, so APP_SECRET follows the repository
+      # secret on every deploy. TOKEN_SIGNING_KEY is generated once and then lives only in
+      # Cloudflare's secret store: created when `wrangler secret list` does not show it,
+      # never rotated by CI (rotation would invalidate every live 1-hour token). A failing
+      # `secret list` fails the job instead of regenerating the key. Manual rotation:
+      # `npx wrangler secret put TOKEN_SIGNING_KEY`.
+      - name: Worker secrets (APP_SECRET, TOKEN_SIGNING_KEY, optional TURN)
+        if: steps.mode.outputs.mode == 'deploy'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+          TURN_KEY_ID: ${{ secrets.TURN_KEY_ID }}
+          TURN_API_TOKEN: ${{ secrets.TURN_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$APP_SECRET" ]]; then
+            printf '%s' "$APP_SECRET" | npx wrangler secret put APP_SECRET
+          else
+            echo "::warning::APP_SECRET repository secret missing: the Worker refuses every /token request until it is set"
+          fi
+          existing="$(npx wrangler secret list --format json)"
+          if jq -e 'map(.name) | index("TOKEN_SIGNING_KEY") != null' <<<"$existing" >/dev/null; then
+            echo "TOKEN_SIGNING_KEY already set on the Worker; kept"
+          else
+            openssl rand -hex 32 | tr -d '\n' | npx wrangler secret put TOKEN_SIGNING_KEY
+            echo "TOKEN_SIGNING_KEY generated and stored on the Worker"
+          fi
+          if [[ -n "$TURN_KEY_ID" && -n "$TURN_API_TOKEN" ]]; then
+            printf '%s' "$TURN_KEY_ID" | npx wrangler secret put TURN_KEY_ID
+            printf '%s' "$TURN_API_TOKEN" | npx wrangler secret put TURN_API_TOKEN
+          else
+            echo "TURN_KEY_ID/TURN_API_TOKEN not set: no TURN relay credentials (STUN only)"
+          fi
+
+      - name: Smoke test and print the signaling URL
+        if: steps.mode.outputs.mode == 'deploy' && steps.deploy.outputs.url != ''
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          for _ in 1 2 3 4 5 6; do
+            if [[ "$(curl -fsS "$URL/health" || true)" == "ok" ]]; then break; fi
+            sleep 5
+          done
+          test "$(curl -fsS "$URL/health")" = "ok"
+          ws="wss://${URL#https://}/ws"
+          echo "Deployed: $URL  (/health = ok)"
+          echo "Signaling URL for DEFAULT_SIGNALING_URL / Settings: $ws"
+          { echo '## CallXL Worker deployed'; echo; echo "- Worker: $URL (/health ok)"; echo "- Signaling URL: \`$ws\`"; } >> "$GITHUB_STEP_SUMMARY"
