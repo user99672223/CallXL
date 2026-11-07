@@ -203,29 +203,30 @@ jobs:
         run: xcodegen generate
 
       - name: xcodebuild test on an iOS Simulator (bindings, audio session, CallKit, UI smoke)
+        timeout-minutes: 40
         run: |
           set -euo pipefail
-          xcrun simctl list devices available
           UDID="$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
           d = json.load(sys.stdin)["devices"]
           ios = sorted((k for k in d if "iOS" in k), key=lambda k: [int(x) for x in k.rsplit("iOS-", 1)[1].split("-")], reverse=True)
-          print(next(x["udid"] for k in ios for x in d[k] if x["name"].startswith("iPhone")))
+          print(next(x["udid"] + " " + x["name"] + " " + k for k in ios for x in d[k] if x["name"].startswith("iPhone")))
           ')"
           echo "simulator: $UDID"
+          UDID="${UDID%% *}"
           xcrun simctl boot "$UDID" || true
-          set +e
+          # Live, filtered progress; the full log is uploaded as an artifact.
           xcodebuild test \
             -project apps/ios/CallXL.xcodeproj -scheme CallXL \
             -destination "platform=iOS Simulator,id=$UDID" \
             -derivedDataPath target/ios/DerivedData-test \
             -resultBundlePath target/ios/CallXLTests.xcresult \
-            CODE_SIGNING_ALLOWED=NO > target/ios/xcodebuild-test.log 2>&1
-          status=$?
-          set -e
-          grep -E "Test Case|Test Suite|error:|launch-to-home|bindings:|bonjour|Executed|failed" target/ios/xcodebuild-test.log || true
-          if [ "$status" -ne 0 ]; then tail -150 target/ios/xcodebuild-test.log; fi
-          exit "$status"
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 120 \
+            -maximum-test-execution-time-allowance 300 \
+            CODE_SIGNING_ALLOWED=NO 2>&1 \
+            | tee target/ios/xcodebuild-test.log \
+            | grep --line-buffered -E "Test Case|Test Suite|error:|launch-to-home|bindings:|bonjour|Executed|failed|BUILD|Testing started|\*\*"
 
       - name: Unsigned IPA
         run: packaging/ios/build-unsigned-ipa.sh
