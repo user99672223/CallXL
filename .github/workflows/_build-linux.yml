@@ -4,8 +4,9 @@
 # Produces:  artifact `e2e-bins`  — debug callxl-cli + the e2e test executables, consumed
 #                                   by the e2e and netem jobs (they never recompile);
 #            artifact `linux-deb` — callxl_<ver>_amd64.deb (once apps/desktop exists);
-#            unit tests and the UniFFI Swift bindgen check run here.
-# Lint (fmt/clippy) is a separate job in ci.yml so it runs in parallel with this build.
+#            unit tests run here.
+# Lint (fmt/clippy) and the UniFFI Swift bindgen check are separate ci.yml jobs so they
+# run in parallel with this build (release builds do not need them).
 name: _build-linux
 
 on:
@@ -79,16 +80,6 @@ jobs:
 
       - name: Unit tests
         run: cargo test --workspace --exclude callxl-e2e
-
-      - name: Swift bindings generate on Linux (UniFFI)
-        run: |
-          set -euo pipefail
-          cargo rustc -p callxl-core --lib --crate-type cdylib
-          cargo run -q -p callxl-core --features bindgen --bin uniffi-bindgen -- \
-            generate --library target/debug/libcallxl_core.so --language swift --out-dir target/swift-bindings
-          test -s target/swift-bindings/CallXLCore.swift
-          test -s target/swift-bindings/CallXLCoreFFI.h
-          test -s target/swift-bindings/CallXLCoreFFI.modulemap
 
       - name: Collect e2e binaries (stable names)
         id: bins

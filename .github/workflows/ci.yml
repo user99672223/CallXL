@@ -2,8 +2,9 @@
 #
 # Jobs (parallel unless noted):
 #   lint     cargo fmt --check + clippy -D warnings
+#   swift-bindgen  UniFFI Swift bindings generate from the Linux cdylib
 #   worker   Cloudflare Worker vitest suite
-#   linux    _build-linux.yml: build, unit tests, Swift bindgen check, .deb; uploads e2e-bins
+#   linux    _build-linux.yml: build, unit tests, .deb; uploads e2e-bins
 #   e2e      (needs linux) fast e2e suites, one job each, on the prebuilt binaries; the
 #            loopback suite also runs the PulseAudio null-sink (platform ADM) case
 #   netem    (needs linux) _netem-matrix.yml: the six §11 tc-netem scenarios in parallel
@@ -47,6 +48,25 @@ jobs:
           cache-key: lint
       - name: cargo clippy -D warnings
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  swift-bindgen:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: bindgen
+      - name: Swift bindings generate on Linux (UniFFI)
+        run: |
+          set -euo pipefail
+          cargo rustc -p callxl-core --lib --crate-type cdylib
+          cargo run -q -p callxl-core --features bindgen --bin uniffi-bindgen -- \
+            generate --library target/debug/libcallxl_core.so --language swift --out-dir target/swift-bindings
+          ls -l target/swift-bindings
+          test -s target/swift-bindings/CallXLCore.swift
+          test -s target/swift-bindings/CallXLCoreFFI.h
+          test -s target/swift-bindings/CallXLCoreFFI.modulemap
 
   worker:
     runs-on: ubuntu-22.04
