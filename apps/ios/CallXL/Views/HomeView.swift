@@ -19,6 +19,10 @@ struct HomeView: View {
                         .font(.caption2)
                         .foregroundStyle(theme.textMuted)
                         .accessibilityIdentifier("home.launchMs")
+                    Text(LaunchClock.breakdown)
+                        .font(.caption2)
+                        .foregroundStyle(theme.textMuted)
+                        .accessibilityIdentifier("home.launchBreakdown")
                 }
             }
             .padding(Tokens.Space.lg)
@@ -50,6 +54,7 @@ struct HomeView: View {
         }
         .onAppear {
             if launchMs == nil {
+                LaunchClock.mark("home.appear")
                 let ms = LaunchClock.msSinceProcessStart()
                 launchMs = ms
                 AppModel.log.info("launch-to-home-ms: \(ms, privacy: .public)")
@@ -68,6 +73,7 @@ struct HomeView: View {
         }
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.roundedRectangle(radius: Tokens.Radius.lg))
+        .disabled(!model.started)
         .accessibilityIdentifier("home.newSession")
     }
 

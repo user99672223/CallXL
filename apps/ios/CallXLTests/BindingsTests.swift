@@ -23,6 +23,20 @@ final class BindingsTests: XCTestCase {
         }
     }
 
+    /// Runs `work` on a background queue while the main run loop keeps spinning.
+    private func offMain(_ work: @escaping () throws -> Void) throws {
+        let done = expectation(description: "off-main work")
+        var failure: Error?
+        DispatchQueue.global(qos: .userInitiated).async {
+            do { try work() } catch { failure = error }
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 30)
+        if let failure {
+            throw failure
+        }
+    }
+
     func testCoreLifecycleThroughBindings() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("callxl-bindings-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -35,8 +49,10 @@ final class BindingsTests: XCTestCase {
         let recorder = Recorder(expectation)
         core.subscribe(listener: recorder)
 
+        // Like the app: start/stop off the main thread (libwebrtc's iOS audio code may
+        // need the main queue while they run).
         let t0 = Date()
-        try core.start()
+        try offMain { try core.start() }
         print("bindings: start() took \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
 
         let card = core.deviceCard()
@@ -65,9 +81,9 @@ final class BindingsTests: XCTestCase {
         XCTAssertNotNil(json["diagnostics"])
 
         let t2 = Date()
-        core.stop()
+        try offMain { core.stop() }
         print("bindings: stop() took \(Int(Date().timeIntervalSince(t2) * 1000)) ms")
-        XCTAssertThrowsError(try core.start()) // a stopped core cannot start again
+        XCTAssertThrowsError(try offMain { try core.start() }) // a stopped core cannot start again
     }
 
     /// The Objective-C side of libwebrtc (RTCAudioSession) is loaded from CallXLCore

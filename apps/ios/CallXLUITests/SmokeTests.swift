@@ -74,7 +74,12 @@ final class SmokeTests: XCTestCase {
         // Diagnostics during the call shows peer stats
         app.buttons["call.diagnostics"].tap()
         XCTAssertTrue(app.buttons["diag.export"].waitForExistence(timeout: 5))
-        XCTAssertTrue(labeled(app, "Pair switches").waitForExistence(timeout: 5))
+        // The peer section is below the fold of a lazy List: scroll until it is loaded.
+        let switches = labeled(app, "Pair switches")
+        for _ in 0 ..< 6 where !switches.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(switches.waitForExistence(timeout: 5), "peer stats section")
         back(app)
 
         // Leave
@@ -96,6 +101,7 @@ final class SmokeTests: XCTestCase {
             let text = label.label.isEmpty ? (label.value as? String ?? "") : label.label
             let ms = try XCTUnwrap(Double(text), "launch label \(text)")
             results.append(ms)
+            print("launch phases: \(element(app, "home.launchBreakdown").label)")
             XCTAssertTrue(app.buttons["home.newSession"].exists)
             app.terminate()
         }

@@ -47,6 +47,17 @@ enum LaunchMode {
 
 /// Milliseconds since this process started (kernel start time), for the §1.5 launch check.
 enum LaunchClock {
+    private static var marks: [String] = []
+
+    /// Records a launch phase (main thread only, launch only).
+    static func mark(_ name: String) {
+        marks.append("\(name)=\(Int(msSinceProcessStart()))")
+    }
+
+    static var breakdown: String {
+        marks.joined(separator: " ")
+    }
+
     static func msSinceProcessStart() -> Double {
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.stride
@@ -64,12 +75,15 @@ struct CallXLApp: App {
     @AppStorage("appearance") private var appearance = Appearance.dark.rawValue
 
     init() {
-        let core: CallXlProtocol = if LaunchMode.fakeCore || LaunchMode.unitTestHost {
-            FakeCore()
-        } else {
-            CallXl(config: AppPaths.config())
-        }
-        _model = StateObject(wrappedValue: AppModel(core: core, useCallKit: !LaunchMode.fakeCore && !LaunchMode.unitTestHost))
+        LaunchClock.mark("app.init")
+        let fake = LaunchMode.fakeCore || LaunchMode.unitTestHost
+        let config = fake ? nil : AppPaths.config()
+        _model = StateObject(wrappedValue: AppModel(useCallKit: !fake) {
+            if let config {
+                return CallXl(config: config)
+            }
+            return FakeCore()
+        })
     }
 
     var body: some Scene {

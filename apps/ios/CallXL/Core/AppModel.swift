@@ -24,9 +24,13 @@ struct TrustPromptItem: Identifiable, Equatable {
 /// and the two that can take long (`start`, `stop`) run off the main actor.
 @MainActor
 final class AppModel: ObservableObject {
-    static let log = Logger(subsystem: "com.callxl.app", category: "app")
+    nonisolated static let log = Logger(subsystem: "com.callxl.app", category: "app")
 
-    let core: CallXlProtocol
+    /// Created off the main actor by `start()` (opening the database and the keychain
+    /// must not delay the first frame, §1.5); nil until then, and commands are ignored.
+    private(set) var core: CallXlProtocol?
+    private let makeCore: @Sendable () -> CallXlProtocol
+    private let useCallKit: Bool
     private(set) var calls: CallController?
     let audio: CallAudioController
 
@@ -58,18 +62,11 @@ final class AppModel: ObservableObject {
     /// Outgoing files picked through the document picker stay security-scoped until done.
     private var scopedFiles: [String: URL] = [:]
 
-    init(core: CallXlProtocol, useCallKit: Bool) {
-        self.core = core
-        snapshot = core.snapshot()
+    init(useCallKit: Bool, makeCore: @escaping @Sendable () -> CallXlProtocol) {
+        self.makeCore = makeCore
+        self.useCallKit = useCallKit
+        snapshot = Self.placeholderSnapshot()
         audio = CallAudioController()
-        if useCallKit {
-            calls = CallController(commands: nil)
-        }
-        calls?.commands = self
-        audio.prepareWebRTC(manualAudio: useCallKit)
-        core.subscribe(listener: EventBridge { [weak self] event in
-            self?.handle(event)
-        })
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
         ) { [weak self] note in
@@ -80,20 +77,54 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Starts the core off the main actor; Home is already on screen meanwhile.
+    /// What Home shows for the few hundred ms before the core exists.
+    nonisolated static func placeholderSnapshot() -> Snapshot {
+        Snapshot(
+            device: DeviceCard(displayName: "", signingKey: "", agreementKey: ""),
+            sessions: [], currentSession: nil, callState: .idle, peers: [], muted: false, trustedDevices: [], transfers: [],
+            settings: Settings(
+                displayName: "", signalingUrl: nil, effectiveSignalingUrl: "", downloadDir: "", bitrateCeilingKbps: 510,
+                apm: ApmConfig(aec: true, noiseSuppression: true, nsLevel: .moderate, highPass: true, agc: true),
+                rawMic: false, inputDevice: nil, outputDevice: nil
+            ),
+            cloudConnected: false
+        )
+    }
+
+    /// Creates and starts the core off the main actor; Home is already on screen.
     func start() {
         guard !starting else { return }
         starting = true
-        let core = core
+        let makeCore = makeCore
+        let manualAudio = useCallKit
+        let bridge = EventBridge { [weak self] event in
+            self?.handle(event)
+        }
         Task.detached(priority: .userInitiated) {
+            let t0 = LaunchClock.msSinceProcessStart()
+            let core = makeCore()
+            core.subscribe(listener: bridge)
+            let t1 = LaunchClock.msSinceProcessStart()
+            await MainActor.run { self.didCreate(core, manualAudio: manualAudio) }
             do {
                 try core.start()
+                let t2 = LaunchClock.msSinceProcessStart()
+                Self.log.info("core: created \(t1 - t0, privacy: .public) ms, started \(t2 - t1, privacy: .public) ms (at \(t2, privacy: .public) ms)")
                 await MainActor.run { self.didStart() }
             } catch {
                 let message = (error as? CoreError).map(Self.describe) ?? error.localizedDescription
                 await MainActor.run { self.lastError = message }
             }
         }
+    }
+
+    private func didCreate(_ core: CallXlProtocol, manualAudio: Bool) {
+        self.core = core
+        if useCallKit {
+            calls = CallController(commands: self)
+        }
+        audio.prepareWebRTC(manualAudio: manualAudio)
+        refresh()
     }
 
     private func didStart() {
@@ -108,7 +139,7 @@ final class AppModel: ObservableObject {
 
     /// Leaves and stops the core; blocks up to 5 s, so never on the main actor.
     func shutdown() {
-        let core = core
+        guard let core else { return }
         Task.detached { core.stop() }
     }
 
@@ -120,6 +151,7 @@ final class AppModel: ObservableObject {
     }
 
     func refresh() {
+        guard let core else { return }
         let next = core.snapshot()
         if next != snapshot {
             snapshot = next
@@ -273,7 +305,7 @@ final class AppModel: ObservableObject {
     private func loadChat(session: String) {
         chatSession = session
         chat = []
-        let core = core
+        guard let core else { return }
         Task.detached(priority: .utility) {
             let history = core.chatHistory(session: session, limit: 500, before: nil)
             await MainActor.run {
@@ -294,7 +326,7 @@ final class AppModel: ObservableObject {
         if !chat.contains(where: { $0.id == message.id }) {
             chat.append(message)
             if chatOpen {
-                core.markRead(upTo: message.id)
+                core?.markRead(upTo: message.id)
             } else if !message.own {
                 unread += 1
             }
@@ -303,7 +335,7 @@ final class AppModel: ObservableObject {
 
     func sendChat(_ text: String) {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty, let session = snapshot.currentSession else { return }
+        guard !body.isEmpty, let session = snapshot.currentSession, let core else { return }
         let id = core.sendChat(body: body)
         // The core does not echo our own messages; show it now, receipts update it.
         chat.append(ChatMessage(
@@ -316,7 +348,7 @@ final class AppModel: ObservableObject {
     private func markAllRead() {
         unread = 0
         if let last = chat.last(where: { !$0.own }) {
-            core.markRead(upTo: last.id)
+            core?.markRead(upTo: last.id)
         }
     }
 
@@ -331,6 +363,7 @@ final class AppModel: ObservableObject {
     func offerFile(_ url: URL, to recipients: [String]) {
         guard !recipients.isEmpty else { return }
         let scoped = url.startAccessingSecurityScopedResource()
+        guard let core else { return }
         let id = core.offerFile(path: url.path, recipients: recipients)
         if scoped {
             scopedFiles[id] = url
@@ -339,13 +372,13 @@ final class AppModel: ObservableObject {
     }
 
     func respond(to offer: TransferInfo, accept: Bool) {
-        core.respondFileOffer(id: offer.id, accept: accept)
+        core?.respondFileOffer(id: offer.id, accept: accept)
         fileOffers.removeAll { $0.id == offer.id }
         refresh()
     }
 
     func cancel(_ transfer: TransferInfo) {
-        core.cancelTransfer(id: transfer.id)
+        core?.cancelTransfer(id: transfer.id)
     }
 
     private func updateTransfer(_ t: TransferInfo) {
@@ -366,7 +399,7 @@ final class AppModel: ObservableObject {
 
     func trust(_ prompt: TrustPromptItem) {
         if let key = Data(hex: prompt.peerKey) {
-            core.trustDevice(signingKey: key)
+            core?.trustDevice(signingKey: key)
         }
         trustPrompts.removeAll { $0.peerKey == prompt.peerKey }
     }
@@ -377,7 +410,7 @@ final class AppModel: ObservableObject {
 
     func untrust(_ device: TrustedDevice) {
         if let key = Data(hex: device.key) {
-            core.untrustDevice(signingKey: key)
+            core?.untrustDevice(signingKey: key)
         }
     }
 
@@ -386,34 +419,34 @@ final class AppModel: ObservableObject {
     func setDisplayName(_ name: String) {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty, n != snapshot.settings.displayName else { return }
-        core.setDisplayName(name: n)
+        core?.setDisplayName(name: n)
         snapshot.settings.displayName = n
     }
 
     func setApm(_ cfg: ApmConfig) {
-        core.setAudioProcessing(cfg: cfg)
+        core?.setAudioProcessing(cfg: cfg)
         snapshot.settings.apm = cfg
         snapshot.settings.rawMic = false
     }
 
     func setRawMic(_ raw: Bool) {
-        core.setRawMic(raw: raw)
+        core?.setRawMic(raw: raw)
         snapshot.settings.rawMic = raw
     }
 
     func setBitrate(_ kbps: UInt32) {
-        core.setBitrateCeilingKbps(kbps: kbps)
+        core?.setBitrateCeilingKbps(kbps: kbps)
         snapshot.settings.bitrateCeilingKbps = kbps
     }
 
     func setSignalingUrl(_ url: String) {
         let u = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        core.setSignalingUrl(url: u.isEmpty ? nil : u)
+        core?.setSignalingUrl(url: u.isEmpty ? nil : u)
     }
 
     /// Writes the diagnostics report (JSON) to Documents off the main actor; returns its URL.
     func exportDiagnostics() async -> URL? {
-        let core = core
+        guard let core else { return nil }
         let text = await Task.detached(priority: .userInitiated) { core.exportDiagnostics() }.value
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("callxl-diagnostics-\(Int(Date().timeIntervalSince1970)).json")
@@ -433,26 +466,26 @@ extension AppModel: CallCommands {
     func performJoin(_ target: JoinTarget) {
         audio.configureForCall()
         switch target {
-        case let .create(name): _ = core.createSession(name: name)
-        case let .existing(id): core.joinSession(id: id)
+        case let .create(name): _ = core?.createSession(name: name)
+        case let .existing(id): core?.joinSession(id: id)
         }
         refresh()
     }
 
     func performLeave() {
-        core.leaveSession()
+        core?.leaveSession()
         refresh()
     }
 
     func performSetMuted(_ muted: Bool) {
         userMuted = muted
-        core.setMuted(muted: muted || held)
+        core?.setMuted(muted: muted || held)
         snapshot.muted = muted || held
     }
 
     func performHold(_ onHold: Bool) {
         held = onHold
-        core.setMuted(muted: userMuted || onHold)
+        core?.setMuted(muted: userMuted || onHold)
         snapshot.muted = userMuted || onHold
     }
 
