@@ -35,6 +35,9 @@ triple_for() {
   esac
 }
 
+# libwebrtc.a members defining the ObjC categories used by its iOS audio device module.
+OBJC_CATEGORY_OBJECTS=("RTCAudioSession+Configuration.o" "NSString+StdString.o" "UIDevice+RTCDevice.o")
+
 rustup target add "${TARGETS[@]}"
 
 rm -rf "$OUT"
@@ -44,11 +47,20 @@ for t in "${TARGETS[@]}"; do
   triple="$(triple_for "$t")"
   lk="$(scripts/ci-webrtc-cache.sh "$triple" | tail -1)"
   echo "== $t ($lk)"
+  # Objective-C categories the audio path calls (a static library's categories are only
+  # linked when their object is): linked explicitly instead of -ObjC, which would pull
+  # every ObjC object of libwebrtc (all video codecs, Metal renderers, camera capture) and
+  # their frameworks into the dylib and its launch time (DECISIONS.md).
+  objs="$OUT/objc/$t"
+  mkdir -p "$objs"
+  (cd "$objs" && ar -x "${lk#LK_CUSTOM_WEBRTC=}/lib/libwebrtc.a" "${OBJC_CATEGORY_OBJECTS[@]}")
+  objc_args=()
+  for o in "${OBJC_CATEGORY_OBJECTS[@]}"; do objc_args+=(-C "link-arg=$objs/$o"); done
   # Unstripped so uniffi-bindgen can read the metadata; stripped below.
   env "$lk" CARGO_PROFILE_RELEASE_STRIP=false \
     cargo rustc -p callxl-core --lib --crate-type cdylib --release --target "$t" -- \
       -C link-arg=-Wl,-install_name,@rpath/$FW.framework/$FW \
-      -C link-arg=-ObjC \
+      "${objc_args[@]}" \
       -C link-arg=-Wl,-dead_strip \
       -C link-arg=-Wl,-dead_strip_dylibs
   lib="$TARGET_DIR/$t/release/libcallxl_core.dylib"

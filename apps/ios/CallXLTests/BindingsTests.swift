@@ -1,5 +1,6 @@
 import AVFoundation
 @testable import CallXL
+import UIKit
 import XCTest
 
 /// M1: the UniFFI binding of the real Rust core, on the Simulator.
@@ -93,6 +94,10 @@ final class BindingsTests: XCTestCase {
     func testWebRTCAudioSessionClassesAreLoadedAndConfigured() {
         XCTAssertNotNil(WebRTCAudioBridge.sessionClass)
         XCTAssertNotNil(WebRTCAudioBridge.shared)
+        // Categories the iOS audio device module calls (linked explicitly, D-0104).
+        XCTAssertEqual(WebRTCAudioBridge.shared?.responds(to: NSSelectorFromString("setConfiguration:active:error:")), true)
+        XCTAssertTrue(NSString.responds(to: NSSelectorFromString("stringForStdString:")))
+        XCTAssertTrue(UIDevice.responds(to: NSSelectorFromString("machineName")))
         XCTAssertTrue(WebRTCAudioBridge.applyCallConfiguration())
         let options = WebRTCAudioBridge.configuredOptions ?? []
         XCTAssertTrue(options.contains(.defaultToSpeaker))
