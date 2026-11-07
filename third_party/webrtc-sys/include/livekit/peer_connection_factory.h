@@ -68,8 +68,10 @@ class PeerConnectionFactory {
   rust::String field_trial_lookup(rust::String name) const;
   bool callxl_apply_apm(CallXlApmSettings settings) const;
   CallXlApmSettings callxl_get_apm() const;
+  CallXlApmStats callxl_apm_stats() const;
   CallXlAnaState callxl_ana_state() const;
   bool callxl_uses_test_adm() const;
+  void callxl_set_max_bitrate(int32_t bps) const;
   bool callxl_test_adm_flush() const;
   CallXlTestAdmStats callxl_test_adm_stats() const;
 

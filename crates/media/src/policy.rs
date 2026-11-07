@@ -60,7 +60,10 @@ pub fn policy_for(kind: PathKind, ceiling_kbps: u32) -> PathPolicy {
         bwe_start_bps: start,
         bwe_max_bps: ceiling + OVERHEAD_HEADROOM_BPS,
         encoder_min_bps: OPUS_FLOOR_BPS,
-        encoder_max_bps: ceiling,
+        // The RTP encoding limit applies to the allocation *including* packet overhead
+        // (44.8 kbps measured at 100 pkt/s over IPv4); the exact Opus ceiling is enforced
+        // inside the audio network adaptor (MediaEngine::set_max_opus_bitrate).
+        encoder_max_bps: ceiling + OVERHEAD_HEADROOM_BPS,
         jitter_buffer_min_delay: (kind == PathKind::Lan).then(|| Duration::from_millis(10)),
     }
 }
@@ -146,7 +149,7 @@ mod tests {
     #[test]
     fn policies() {
         let lan = policy_for(PathKind::Lan, 510);
-        assert_eq!((lan.bwe_start_bps, lan.bwe_max_bps, lan.encoder_max_bps), (510_000, 600_000, 510_000));
+        assert_eq!((lan.bwe_start_bps, lan.bwe_max_bps, lan.encoder_max_bps), (510_000, 600_000, 600_000));
         assert_eq!(lan.jitter_buffer_min_delay, Some(Duration::from_millis(10)));
         let net = policy_for(PathKind::Direct, 510);
         assert_eq!(net.bwe_start_bps, 128_000);

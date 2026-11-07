@@ -372,14 +372,15 @@ impl PeerConnection {
             .map_err(|e| MediaError::PeerConnection(rtc_error_message(&e)))
     }
 
-    /// `PeerConnection::SetBitrate` (BWE min/start/max).
-    pub fn set_bitrate(&self, min_bps: i32, start_bps: i32, max_bps: i32) -> Result<()> {
+    /// `PeerConnection::SetBitrate` (BWE min/start/max). `start` = `None` keeps the
+    /// running estimate.
+    pub fn set_bitrate(&self, min_bps: i32, start_bps: Option<i32>, max_bps: i32) -> Result<()> {
         self.pc
             .set_bitrate(pc::BitrateSettings {
                 has_min_bitrate_bps: true,
                 min_bitrate_bps: min_bps,
-                has_start_bitrate_bps: true,
-                start_bitrate_bps: start_bps,
+                has_start_bitrate_bps: start_bps.is_some(),
+                start_bitrate_bps: start_bps.unwrap_or(0),
                 has_max_bitrate_bps: true,
                 max_bitrate_bps: max_bps,
             })

@@ -193,6 +193,18 @@ CallXlApmSettings PeerConnectionFactory::callxl_get_apm() const {
   return s;
 }
 
+CallXlApmStats PeerConnectionFactory::callxl_apm_stats() const {
+  CallXlApmStats s{-1, -1, -1, -1, -1};
+  if (!callxl_apm_ || !*callxl_apm_) return s;
+  const webrtc::AudioProcessingStats st = (*callxl_apm_)->GetStatistics();
+  s.echo_return_loss_db = st.echo_return_loss.value_or(-1);
+  s.echo_return_loss_enhancement_db = st.echo_return_loss_enhancement.value_or(-1);
+  s.divergent_filter_fraction = st.divergent_filter_fraction.value_or(-1);
+  s.delay_ms = st.delay_ms.value_or(-1);
+  s.residual_echo_likelihood = st.residual_echo_likelihood.value_or(-1);
+  return s;
+}
+
 CallXlAnaState PeerConnectionFactory::callxl_ana_state() const {
   CallXlAnaState s{};
   if (!callxl_ana_) return s;
@@ -201,7 +213,13 @@ CallXlAnaState PeerConnectionFactory::callxl_ana_state() const {
   s.adaptors_created = callxl_ana_->adaptors_created.load();
   s.last_loss_permille = callxl_ana_->last_loss_permille.load();
   s.avg_loss_permille = callxl_ana_->avg_loss_permille.load();
+  s.encoder_channels = callxl_ana_->encoder_channels.load();
+  s.encoder_complexity = callxl_ana_->encoder_complexity.load();
   return s;
+}
+
+void PeerConnectionFactory::callxl_set_max_bitrate(int32_t bps) const {
+  if (callxl_ana_) callxl_ana_->max_bitrate_bps.store(bps, std::memory_order_relaxed);
 }
 
 bool PeerConnectionFactory::callxl_uses_test_adm() const {

@@ -30,6 +30,7 @@ namespace livekit_ffi {
 struct CallXlFactoryOptions;
 struct CallXlPcConfig;
 struct CallXlApmSettings;
+struct CallXlApmStats;
 struct CallXlAnaState;
 struct CallXlTestAdmStats;
 struct CallXlCandidateInfo;
@@ -60,6 +61,10 @@ struct AnaShared {
   std::atomic<int> adaptors_created{0};
   std::atomic<int> last_loss_permille{0};
   std::atomic<int> avg_loss_permille{0};
+  std::atomic<int> encoder_channels{0};
+  std::atomic<int> encoder_complexity{0};
+  // User bitrate ceiling for the Opus target (bps); applied after BitrateController.
+  std::atomic<int> max_bitrate_bps{510000};
   // Policy (set once at factory creation).
   float increase_loss = 0.05f;   // switch to 20 ms above this 5 s average
   float decrease_loss = 0.01f;   // back to 10 ms after `decrease_hold_ms` below this

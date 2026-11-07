@@ -35,6 +35,7 @@ pub struct StatsReport {
     pub concealed_samples: u64,
     pub total_samples_received: u64,
     pub fec_packets_received: u64,
+    pub in_audio_level: f64,
     // remote-inbound-rtp (what the far end reports about our stream)
     pub remote_fraction_lost: Option<f64>,
     pub remote_packets_lost: Option<i64>,
@@ -94,7 +95,9 @@ impl StatsReport {
         let mut send_codec_id = String::new();
         let mut selected_pair_id = String::new();
         for o in &items {
-            r.ts_ms = r.ts_ms.max(f(o, "timestamp").unwrap_or(0.0));
+            // libwebrtc's RTCStats JSON carries `timestamp` in microseconds.
+            let ts = f(o, "timestamp").unwrap_or(0.0);
+            r.ts_ms = r.ts_ms.max(if ts > 1e14 { ts / 1000.0 } else { ts });
             match o.get("type").and_then(Value::as_str).unwrap_or("") {
                 "outbound-rtp" if kind(o) => {
                     r.out_packets += u(o, "packetsSent");
@@ -116,6 +119,7 @@ impl StatsReport {
                     r.concealed_samples += u(o, "concealedSamples");
                     r.total_samples_received += u(o, "totalSamplesReceived");
                     r.fec_packets_received += u(o, "fecPacketsReceived");
+                    r.in_audio_level = r.in_audio_level.max(f(o, "audioLevel").unwrap_or(0.0));
                 }
                 "remote-inbound-rtp" if kind(o) => {
                     r.remote_fraction_lost = f(o, "fractionLost");

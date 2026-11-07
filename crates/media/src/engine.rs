@@ -110,8 +110,12 @@ pub struct EngineOptions {
 /// (`registered_field_trials.h`). `WebRTC-Audio-SendSideBwe` and
 /// `WebRTC-SendSideBwe-WithOverhead` no longer exist there: audio send-side BWE is on
 /// whenever transport-cc is negotiated and overhead accounting is the default
-/// (`WebRTC-Audio-LegacyOverhead` would disable it). See DECISIONS.md.
-pub const DEFAULT_FIELD_TRIALS: &str = "WebRTC-Audio-Allocation/min:32kbps,max:600kbps/";
+/// (`WebRTC-Audio-LegacyOverhead` would disable it). `WebRTC-Audio-AlrProbing` lets the
+/// app-limited audio stream trigger ALR probes; without it the audio allocation stays
+/// at the start rate (measured: 83.2 kbps target forever vs 510 kbps within ~1 s).
+/// See DECISIONS.md.
+pub const DEFAULT_FIELD_TRIALS: &str =
+    "WebRTC-Audio-Allocation/min:32kbps,max:600kbps/WebRTC-Audio-AlrProbing/Enabled/";
 
 impl Default for EngineOptions {
     fn default() -> Self {
@@ -133,6 +137,8 @@ pub struct AnaState {
     pub adaptors_created: i32,
     pub last_loss_permille: i32,
     pub avg_loss_permille: i32,
+    pub encoder_channels: i32,
+    pub encoder_complexity: i32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -263,6 +269,13 @@ impl MediaEngine {
         ApmSettings::from_ffi(&self.factory.callxl_get_apm())
     }
 
+    /// AEC3 statistics: (ERL dB, ERLE dB, divergent filter fraction, delay ms, residual
+    /// echo likelihood); -1 = not available yet.
+    pub fn apm_stats(&self) -> (f64, f64, f64, i32, f64) {
+        let s = self.factory.callxl_apm_stats();
+        (s.echo_return_loss_db, s.echo_return_loss_enhancement_db, s.divergent_filter_fraction, s.delay_ms, s.residual_echo_likelihood)
+    }
+
     pub fn ana_state(&self) -> AnaState {
         let s = self.factory.callxl_ana_state();
         AnaState {
@@ -271,7 +284,14 @@ impl MediaEngine {
             adaptors_created: s.adaptors_created,
             last_loss_permille: s.last_loss_permille,
             avg_loss_permille: s.avg_loss_permille,
+            encoder_channels: s.encoder_channels,
+            encoder_complexity: s.encoder_complexity,
         }
+    }
+
+    /// Caps the Opus target bitrate (user ceiling, §3) inside the audio network adaptor.
+    pub fn set_max_opus_bitrate(&self, bps: i32) {
+        self.factory.callxl_set_max_bitrate(bps);
     }
 
     pub fn test_adm_flush(&self) -> bool {
@@ -365,6 +385,7 @@ mod tests {
         })
         .expect("engine");
         assert_eq!(engine.field_trial("WebRTC-Audio-Allocation"), "min:32kbps,max:600kbps");
+        assert_eq!(engine.field_trial("WebRTC-Audio-AlrProbing"), "Enabled");
         assert_eq!(engine.field_trial("WebRTC-Does-Not-Exist"), "");
     }
 

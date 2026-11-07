@@ -45,6 +45,11 @@ pub enum MediaError {
     Closed,
 }
 
+/// The field-trial string CallXL runs with.
+pub fn engine_default_field_trials() -> &'static str {
+    engine::DEFAULT_FIELD_TRIALS
+}
+
 pub type Result<T> = std::result::Result<T, MediaError>;
 
 pub(crate) fn rtc_error_message(e: &cxx::Exception) -> String {

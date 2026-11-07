@@ -154,6 +154,21 @@ class LossFrameLengthController final : public webrtc::Controller {
   int64_t low_since_ms_ = -1;
 };
 
+// Runs last: caps the ANA's bitrate decision at the user's ceiling, so BWE and the
+// RTP encoding limit can include packet overhead while the Opus target stays exact.
+class CeilingController final : public webrtc::Controller {
+ public:
+  explicit CeilingController(std::shared_ptr<AnaShared> shared) : shared_(std::move(shared)) {}
+  void UpdateNetworkMetrics(const NetworkMetrics&) override {}
+  void MakeDecision(webrtc::AudioEncoderRuntimeConfig* config) override {
+    const int cap = shared_->max_bitrate_bps.load(std::memory_order_relaxed);
+    if (config->bitrate_bps && *config->bitrate_bps > cap) config->bitrate_bps = cap;
+  }
+
+ private:
+  std::shared_ptr<AnaShared> shared_;
+};
+
 class CallXlAudioEncoderFactory : public webrtc::AudioEncoderFactory {
  public:
   CallXlAudioEncoderFactory(std::shared_ptr<AnaShared> ana,
@@ -188,6 +203,8 @@ class CallXlAudioEncoderFactory : public webrtc::AudioEncoderFactory {
     if (!cfg->IsOk()) return nullptr;
 
     std::shared_ptr<AnaShared> ana = ana_;
+    ana->encoder_channels.store(static_cast<int>(cfg->num_channels), std::memory_order_relaxed);
+    ana->encoder_complexity.store(cfg->complexity, std::memory_order_relaxed);
     const int initial_frame = cfg->frame_size_ms;
     const int initial_bitrate = cfg->bitrate_bps.value_or(64000);
     auto creator = [env, ana, initial_frame, initial_bitrate](absl::string_view)
@@ -198,6 +215,7 @@ class CallXlAudioEncoderFactory : public webrtc::AudioEncoderFactory {
           std::make_unique<webrtc::audio_network_adaptor::BitrateController>(
               webrtc::audio_network_adaptor::BitrateController::Config(
                   initial_bitrate, initial_frame, 0, 0)));
+      controllers.push_back(std::make_unique<CeilingController>(ana));
       std::map<const webrtc::Controller*, std::pair<int, float>> scoring;
       auto manager = std::make_unique<webrtc::ControllerManagerImpl>(
           env, webrtc::ControllerManagerImpl::Config(0, 0.f),

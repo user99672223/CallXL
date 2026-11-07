@@ -112,6 +112,7 @@ class TestAudioDevice : public webrtc::AudioDeviceModule {
     while (play_.size() % kFrame) play_.push_back(0);
     if (!record_path_.empty()) record_.resize(size_t{record_max_secs} * kRate);
     scratch_.resize(kFrame * 2);
+
   }
 
   ~TestAudioDevice() override { Terminate(); }

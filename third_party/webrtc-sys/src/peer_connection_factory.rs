@@ -102,6 +102,19 @@ pub mod ffi {
         pub adaptors_created: i32,
         pub last_loss_permille: i32,
         pub avg_loss_permille: i32,
+        /// Channels the Opus encoder actually encodes (1 = mono).
+        pub encoder_channels: i32,
+        pub encoder_complexity: i32,
+    }
+
+    /// AEC3 statistics from `AudioProcessing::GetStatistics` (-1 = not available).
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlApmStats {
+        pub echo_return_loss_db: f64,
+        pub echo_return_loss_enhancement_db: f64,
+        pub divergent_filter_fraction: f64,
+        pub delay_ms: i32,
+        pub residual_echo_likelihood: f64,
     }
 
     #[derive(Clone, Debug, Default)]
@@ -231,8 +244,10 @@ pub mod ffi {
         fn field_trial_lookup(self: &PeerConnectionFactory, name: String) -> String;
         fn callxl_apply_apm(self: &PeerConnectionFactory, settings: CallXlApmSettings) -> bool;
         fn callxl_get_apm(self: &PeerConnectionFactory) -> CallXlApmSettings;
+        fn callxl_apm_stats(self: &PeerConnectionFactory) -> CallXlApmStats;
         fn callxl_ana_state(self: &PeerConnectionFactory) -> CallXlAnaState;
         fn callxl_uses_test_adm(self: &PeerConnectionFactory) -> bool;
+        fn callxl_set_max_bitrate(self: &PeerConnectionFactory, bps: i32);
         fn callxl_test_adm_flush(self: &PeerConnectionFactory) -> bool;
         fn callxl_test_adm_stats(self: &PeerConnectionFactory) -> CallXlTestAdmStats;
     }
