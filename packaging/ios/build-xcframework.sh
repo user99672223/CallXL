@@ -35,8 +35,18 @@ triple_for() {
   esac
 }
 
-# libwebrtc.a members defining the ObjC categories used by its iOS audio device module.
-OBJC_CATEGORY_OBJECTS=("RTCAudioSession+Configuration.o" "NSString+StdString.o" "UIDevice+RTCDevice.o")
+# libwebrtc.a members defining ObjC categories on classes this dylib links: the iOS audio
+# device module (RTCAudioSession, NSString, UIDevice) and the ObjC default video codec
+# factories that webrtc-sys installs (RTCVideoCodecInfo, RTCEncodedImage,
+# RTCVideoEncoderSettings, UIDevice+H264Profile). The other 5 category objects of
+# webrtc-a545de4 extend classes nothing here links (ObjC RTCPeerConnection and its stats,
+# RTCPeerConnectionFactoryBuilder, AVCaptureSession camera capture), so their methods
+# cannot be called. A missing one fails BindingsTests (unrecognized selector in start()).
+OBJC_CATEGORY_OBJECTS=(
+  "RTCAudioSession+Configuration.o" "NSString+StdString.o" "UIDevice+RTCDevice.o"
+  "RTCVideoCodecInfo+Private.o" "RTCEncodedImage+Private.o" "RTCVideoEncoderSettings+Private.o"
+  "UIDevice+H264Profile.o"
+)
 
 rustup target add "${TARGETS[@]}"
 
