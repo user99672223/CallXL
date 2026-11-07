@@ -1,0 +1,167 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  CC: clang-21
+  CXX: clang++-21
+  WEBRTC_TAG: webrtc-a545de4
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages (clang 21 for libwebrtc's hermetic libc++, glib headers, PulseAudio)
+        run: |
+          set -euo pipefail
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q clang-21 libglib2.0-dev pkg-config pulseaudio pulseaudio-utils iproute2
+          clang++-21 --version
+
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Cache prebuilt libwebrtc (${{ env.WEBRTC_TAG }})
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/callxl/${{ env.WEBRTC_TAG }}
+          key: libwebrtc-${{ env.WEBRTC_TAG }}-linux-x64-release
+
+      - name: Fetch libwebrtc (no-op when cached)
+        run: scripts/ci-webrtc-cache.sh linux-x64-release
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build callxl-cli and test binaries
+        run: |
+          cargo build -p callxl-cli
+          cargo test --workspace --no-run
+
+      - name: Unit tests
+        run: cargo test --workspace --exclude callxl-e2e
+
+      - name: Swift bindings generate on Linux (UniFFI)
+        run: |
+          set -euo pipefail
+          cargo rustc -p callxl-core --lib --crate-type cdylib
+          cargo run -q -p callxl-core --features bindgen --bin uniffi-bindgen -- \
+            generate --library target/debug/libcallxl_core.so --language swift --out-dir target/swift-bindings
+          ls -l target/swift-bindings
+          test -s target/swift-bindings/CallXLCore.swift
+          test -s target/swift-bindings/CallXLCoreFFI.h
+          test -s target/swift-bindings/CallXLCoreFFI.modulemap
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: infra/worker/package-lock.json
+
+      - name: Worker tests (vitest)
+        working-directory: infra/worker
+        run: |
+          npm ci
+          npm test
+
+      - name: e2e (tc netem on lo, as root)
+        env:
+          CALLXL_NETEM: tc
+          CALLXL_E2E_ARTIFACTS: ${{ github.workspace }}/target/e2e-artifacts
+        run: |
+          set -euo pipefail
+          ip -6 addr show dev lo
+          sudo ip link set lo multicast on
+          # Build as the runner user, run the test executables as root (tc needs CAP_NET_ADMIN).
+          mapfile -t BINS < <(cargo test -p callxl-e2e --no-run --message-format=json 2>/dev/null \
+            | jq -r 'select(.profile.test == true and .executable != null) | .executable')
+          export CALLXL_CLI="$PWD/target/debug/callxl-cli"
+          status=0
+          for b in "${BINS[@]}"; do
+            echo "::group::$(basename "$b")"
+            sudo -E env PATH="$PATH" "$b" --test-threads=1 --nocapture || status=1
+            echo "::endgroup::"
+          done
+          sudo chown -R "$(id -u):$(id -g)" target/e2e-artifacts || true
+          exit $status
+
+      - name: PulseAudio null sink exercised once (platform ADM)
+        env:
+          CALLXL_E2E_ADM: platform
+          CALLXL_E2E_ARTIFACTS: ${{ github.workspace }}/target/e2e-artifacts-pulse
+        run: |
+          set -euo pipefail
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=callxl_null
+          pactl set-default-sink callxl_null
+          pactl set-default-source callxl_null.monitor
+          # Speech into the null sink so the platform capture (its monitor) is not silence:
+          # with silence VBR Opus sends ~2 kbps and BWE has nothing to grow on (run 42337000540).
+          wav="$(ls target/e2e-artifacts/assets/*.wav | head -1)"
+          ( while true; do paplay -d callxl_null "$wav" || break; done ) &
+          player=$!
+          cargo test -p callxl-e2e --test loopback -- loopback_v4_lan_policy --nocapture
+          kill "$player" || true
+
+      - name: Upload callxl-cli
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: callxl-cli
+          path: target/debug/callxl-cli
+          if-no-files-found: warn
+
+      - name: Upload e2e logs, recordings, diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            target/e2e-artifacts
+            target/e2e-artifacts-pulse
+            !target/**/assets
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Phase 2 adds these jobs (placeholders, intentionally commented out):
+  #
+  # windows:
+  #   runs-on: windows-latest
+  #   steps: checkout · clang/MSVC toolchain · libwebrtc cache (win-x64-release) ·
+  #          cargo build (static CRT) · cargo test --workspace --exclude callxl-e2e ·
+  #          loopback e2e with the test ADM · Inno Setup → CallXL-Setup.exe ·
+  #          silent install/uninstall smoke test · upload CallXL-Setup.exe
+  #
+  # macos:
+  #   runs-on: macos-latest
+  #   steps: checkout · libwebrtc caches (ios-device-arm64, ios-simulator-arm64) ·
+  #          cargo rustc --crate-type staticlib per target → CallXLCore.xcframework ·
+  #          uniffi-bindgen swift · xcodebuild test (iOS Simulator) · unsigned .ipa ·
+  #          upload CallXL-unsigned.ipa
+  # ---------------------------------------------------------------------------

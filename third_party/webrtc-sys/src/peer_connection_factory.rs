@@ -1,0 +1,451 @@
+// Copyright 2025 LiveKit, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+pub use cxx::SharedPtr;
+
+use std::sync::Arc;
+
+use crate::{
+    candidate::ffi::Candidate, data_channel::ffi::DataChannel, impl_thread_safety,
+    jsep::ffi::IceCandidate, media_stream::ffi::MediaStream, rtp_receiver::ffi::RtpReceiver,
+    rtp_transceiver::ffi::RtpTransceiver,
+};
+
+#[cxx::bridge(namespace = "livekit_ffi")]
+pub mod ffi {
+    pub struct CandidatePair {
+        local: SharedPtr<Candidate>,
+        remote: SharedPtr<Candidate>,
+    }
+
+    pub struct CandidatePairChangeEvent {
+        selected_candidate_pair: CandidatePair,
+        last_data_received_ms: i64,
+        reason: String,
+        estimated_disconnected_time_ms: i64,
+    }
+
+    // ---- CallXL additions (see CALLXL_CHANGES.md) ----
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlApmSettings {
+        pub aec: bool,
+        pub ns: bool,
+        /// 0 = low, 1 = moderate, 2 = high
+        pub ns_level: i32,
+        pub high_pass: bool,
+        pub agc2: bool,
+        pub agc2_max_gain_db: f32,
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct CallXlFactoryOptions {
+        /// libwebrtc field-trial string, "Name/Value/Name2/Value2/".
+        pub field_trials: String,
+        /// PeerConnectionFactory::Options::network_ignore_mask; -1 keeps the default.
+        pub network_ignore_mask: i32,
+        /// Interface names excluded from candidate gathering.
+        pub network_ignore_list: Vec<String>,
+        pub use_test_adm: bool,
+        pub test_play_wav: String,
+        pub test_record_wav: String,
+        pub test_record_max_secs: u32,
+        pub opus_complexity: i32,
+        pub ana_enabled: bool,
+        pub ana_increase_loss: f32,
+        pub ana_decrease_loss: f32,
+        pub ana_window_ms: i32,
+        pub ana_decrease_hold_ms: i32,
+        pub apm: CallXlApmSettings,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlIceParams {
+        pub enabled: bool,
+        pub rtt_delta_ms: i32,
+        pub loss_delta: f32,
+        pub sustain_ms: i32,
+        pub cooldown_ms: i32,
+        pub v6_bonus_ms: i32,
+        pub initial_grace_ms: i32,
+        pub recheck_ms: i32,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlPcConfig {
+        pub port_allocator_flags: u32,
+        pub max_ipv6_networks: i32,
+        pub ice_connection_receiving_timeout_ms: i32,
+        pub ice_backup_ping_interval_ms: i32,
+        pub stable_writable_ping_interval_ms: i32,
+        pub ice_check_min_interval_ms: i32,
+        pub audio_jitter_buffer_min_delay_ms: i32,
+        pub audio_jitter_buffer_fast_accelerate: bool,
+        pub audio_rtcp_report_interval_ms: i32,
+        pub ice: CallXlIceParams,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlAnaState {
+        pub frame_length_ms: i32,
+        pub switches: i32,
+        pub adaptors_created: i32,
+        pub last_loss_permille: i32,
+        pub avg_loss_permille: i32,
+        /// Channels the Opus encoder actually encodes (1 = mono).
+        pub encoder_channels: i32,
+        pub encoder_complexity: i32,
+    }
+
+    /// AEC3 statistics from `AudioProcessing::GetStatistics` (-1 = not available).
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlApmStats {
+        pub echo_return_loss_db: f64,
+        pub echo_return_loss_enhancement_db: f64,
+        pub divergent_filter_fraction: f64,
+        pub delay_ms: i32,
+        pub residual_echo_likelihood: f64,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlTestAdmStats {
+        pub active: bool,
+        pub recorded_frames: u64,
+        pub played_frames: u64,
+        pub max_tick_late_us: i64,
+        pub late_ticks: u64,
+        pub record_capacity_frames: u64,
+    }
+
+    extern "C++" {
+        include!("livekit/rtp_parameters.h");
+        include!("livekit/rtc_error.h");
+        include!("livekit/helper.h");
+        include!("livekit/candidate.h");
+        include!("livekit/media_stream.h");
+        include!("livekit/rtp_transceiver.h");
+        include!("livekit/rtp_sender.h");
+        include!("livekit/rtp_receiver.h");
+        include!("livekit/data_channel.h");
+        include!("livekit/jsep.h");
+        include!("livekit/webrtc.h");
+        include!("livekit/peer_connection.h");
+        include!("livekit/audio_track.h");
+
+        type RtcConfiguration = crate::peer_connection::ffi::RtcConfiguration;
+        type PeerConnectionState = crate::peer_connection::ffi::PeerConnectionState;
+        type SignalingState = crate::peer_connection::ffi::SignalingState;
+        type IceConnectionState = crate::peer_connection::ffi::IceConnectionState;
+        type IceGatheringState = crate::peer_connection::ffi::IceGatheringState;
+        type AudioTrackSource = crate::audio_track::ffi::AudioTrackSource;
+        type VideoTrackSource = crate::video_track::ffi::VideoTrackSource;
+        type RtpCapabilities = crate::rtp_parameters::ffi::RtpCapabilities;
+        type AudioTrack = crate::audio_track::ffi::AudioTrack;
+        type VideoTrack = crate::video_track::ffi::VideoTrack;
+        type MediaStreamPtr = crate::helper::ffi::MediaStreamPtr;
+        type CandidatePtr = crate::helper::ffi::CandidatePtr;
+        type RtpSenderPtr = crate::helper::ffi::RtpSenderPtr;
+        type RtpReceiverPtr = crate::helper::ffi::RtpReceiverPtr;
+        type RtpTransceiverPtr = crate::helper::ffi::RtpTransceiverPtr;
+        type RtcError = crate::rtc_error::ffi::RtcError;
+        type Candidate = crate::candidate::ffi::Candidate;
+        type IceCandidate = crate::jsep::ffi::IceCandidate;
+        type DataChannel = crate::data_channel::ffi::DataChannel;
+        type DataChannelInit = crate::data_channel::ffi::DataChannelInit;
+        type RtpSender = crate::rtp_sender::ffi::RtpSender;
+        type RtpReceiver = crate::rtp_receiver::ffi::RtpReceiver;
+        type RtpTransceiver = crate::rtp_transceiver::ffi::RtpTransceiver;
+        type RtpTransceiverInit = crate::rtp_transceiver::ffi::RtpTransceiverInit;
+        type MediaStream = crate::media_stream::ffi::MediaStream;
+        type MediaStreamTrack = crate::media_stream::ffi::MediaStreamTrack;
+        type SessionDescription = crate::jsep::ffi::SessionDescription;
+        type MediaType = crate::webrtc::ffi::MediaType;
+        type VideoEncoderBackend = crate::webrtc::ffi::VideoEncoderBackend;
+    }
+
+    unsafe extern "C++" {
+        include!("livekit/peer_connection_factory.h");
+
+        type PeerConnection = crate::peer_connection::ffi::PeerConnection;
+        type PeerConnectionFactory;
+
+        fn create_peer_connection_factory() -> SharedPtr<PeerConnectionFactory>;
+        fn create_peer_connection_factory_with_zero_playout_delay(
+        ) -> SharedPtr<PeerConnectionFactory>;
+        fn create_peer_connection_factory_with_options(
+            zero_playout_delay: bool,
+            enable_warp: bool,
+        ) -> SharedPtr<PeerConnectionFactory>;
+
+        fn zero_playout_delay_enabled(self: &PeerConnectionFactory) -> bool;
+
+        fn create_peer_connection(
+            self: &PeerConnectionFactory,
+            config: RtcConfiguration,
+            observer: Box<PeerConnectionObserverWrapper>,
+        ) -> Result<SharedPtr<PeerConnection>>;
+
+        fn create_video_track(
+            self: &PeerConnectionFactory,
+            label: String,
+            source: SharedPtr<VideoTrackSource>,
+        ) -> SharedPtr<VideoTrack>;
+
+        fn create_audio_track(
+            self: &PeerConnectionFactory,
+            label: String,
+            source: SharedPtr<AudioTrackSource>,
+        ) -> SharedPtr<AudioTrack>;
+
+        // Create an audio track that uses the ADM for capture (Platform ADM mode)
+        fn create_device_audio_track(
+            self: &PeerConnectionFactory,
+            label: String,
+        ) -> SharedPtr<AudioTrack>;
+
+        fn rtp_sender_capabilities(
+            self: &PeerConnectionFactory,
+            kind: MediaType,
+        ) -> RtpCapabilities;
+
+        fn rtp_receiver_capabilities(
+            self: &PeerConnectionFactory,
+            kind: MediaType,
+        ) -> RtpCapabilities;
+
+        fn video_encoder_backend_codecs(
+            self: &PeerConnectionFactory,
+            backend: VideoEncoderBackend,
+        ) -> Vec<String>;
+
+        // ---- CallXL additions ----
+        fn create_peer_connection_callxl(
+            self: &PeerConnectionFactory,
+            config: RtcConfiguration,
+            ext: CallXlPcConfig,
+            observer: Box<PeerConnectionObserverWrapper>,
+        ) -> Result<SharedPtr<PeerConnection>>;
+        fn create_callxl_audio_track(
+            self: &PeerConnectionFactory,
+            label: String,
+            apm: CallXlApmSettings,
+            ana: bool,
+        ) -> SharedPtr<AudioTrack>;
+        fn field_trial_lookup(self: &PeerConnectionFactory, name: String) -> String;
+        fn callxl_apply_apm(self: &PeerConnectionFactory, settings: CallXlApmSettings) -> bool;
+        fn callxl_get_apm(self: &PeerConnectionFactory) -> CallXlApmSettings;
+        fn callxl_apm_stats(self: &PeerConnectionFactory) -> CallXlApmStats;
+        fn callxl_ana_state(self: &PeerConnectionFactory) -> CallXlAnaState;
+        fn callxl_uses_test_adm(self: &PeerConnectionFactory) -> bool;
+        fn callxl_set_max_bitrate(self: &PeerConnectionFactory, bps: i32);
+        fn callxl_test_adm_flush(self: &PeerConnectionFactory) -> bool;
+        fn callxl_test_adm_stats(self: &PeerConnectionFactory) -> CallXlTestAdmStats;
+    }
+
+    impl WeakPtr<PeerConnectionFactory> {}
+
+    extern "Rust" {
+        type PeerConnectionObserverWrapper;
+
+        fn on_signaling_change(self: &PeerConnectionObserverWrapper, new_state: SignalingState);
+        fn on_add_stream(self: &PeerConnectionObserverWrapper, stream: SharedPtr<MediaStream>);
+        fn on_remove_stream(self: &PeerConnectionObserverWrapper, stream: SharedPtr<MediaStream>);
+        fn on_data_channel(
+            self: &PeerConnectionObserverWrapper,
+            data_channel: SharedPtr<DataChannel>,
+        );
+        fn on_renegotiation_needed(self: &PeerConnectionObserverWrapper);
+        fn on_negotiation_needed_event(self: &PeerConnectionObserverWrapper, event: u32);
+        fn on_ice_connection_change(
+            self: &PeerConnectionObserverWrapper,
+            new_state: IceConnectionState,
+        );
+        fn on_standardized_ice_connection_change(
+            self: &PeerConnectionObserverWrapper,
+            new_state: IceConnectionState,
+        );
+        fn on_connection_change(
+            self: &PeerConnectionObserverWrapper,
+            new_state: PeerConnectionState,
+        );
+        fn on_ice_gathering_change(
+            self: &PeerConnectionObserverWrapper,
+            new_state: IceGatheringState,
+        );
+        fn on_ice_candidate(
+            self: &PeerConnectionObserverWrapper,
+            candidate: SharedPtr<IceCandidate>,
+        );
+        fn on_ice_candidate_error(
+            self: &PeerConnectionObserverWrapper,
+            address: String,
+            port: i32,
+            url: String,
+            error_code: i32,
+            error_text: String,
+        );
+        fn on_ice_candidates_removed(
+            self: &PeerConnectionObserverWrapper,
+            removed: Vec<CandidatePtr>,
+        );
+        fn on_ice_connection_receiving_change(
+            self: &PeerConnectionObserverWrapper,
+            receiving: bool,
+        );
+        fn on_ice_selected_candidate_pair_changed(
+            self: &PeerConnectionObserverWrapper,
+            event: CandidatePairChangeEvent,
+        );
+        fn on_add_track(
+            self: &PeerConnectionObserverWrapper,
+            receiver: SharedPtr<RtpReceiver>,
+            streams: Vec<MediaStreamPtr>,
+        );
+        fn on_track(self: &PeerConnectionObserverWrapper, transceiver: SharedPtr<RtpTransceiver>);
+        fn on_remove_track(self: &PeerConnectionObserverWrapper, receiver: SharedPtr<RtpReceiver>);
+        fn on_interesting_usage(self: &PeerConnectionObserverWrapper, usage_pattern: i32);
+        fn on_ice_controller_decision(self: &PeerConnectionObserverWrapper, reason: String);
+    }
+}
+
+impl_thread_safety!(ffi::PeerConnectionFactory, Send + Sync);
+
+pub trait PeerConnectionObserver: Send + Sync {
+    fn on_signaling_change(&self, new_state: ffi::SignalingState);
+    fn on_add_stream(&self, stream: SharedPtr<MediaStream>);
+    fn on_remove_stream(&self, stream: SharedPtr<MediaStream>);
+    fn on_data_channel(&self, data_channel: SharedPtr<DataChannel>);
+    fn on_renegotiation_needed(&self);
+    fn on_negotiation_needed_event(&self, event: u32);
+    fn on_ice_connection_change(&self, new_state: ffi::IceConnectionState);
+    fn on_standardized_ice_connection_change(&self, new_state: ffi::IceConnectionState);
+    fn on_connection_change(&self, new_state: ffi::PeerConnectionState);
+    fn on_ice_gathering_change(&self, new_state: ffi::IceGatheringState);
+    fn on_ice_candidate(&self, candidate: SharedPtr<IceCandidate>);
+    fn on_ice_candidate_error(
+        &self,
+        address: String,
+        port: i32,
+        url: String,
+        error_code: i32,
+        error_text: String,
+    );
+    fn on_ice_candidates_removed(&self, removed: Vec<SharedPtr<Candidate>>);
+    fn on_ice_connection_receiving_change(&self, receiving: bool);
+    fn on_ice_selected_candidate_pair_changed(&self, event: ffi::CandidatePairChangeEvent);
+    fn on_add_track(&self, receiver: SharedPtr<RtpReceiver>, streams: Vec<SharedPtr<MediaStream>>);
+    fn on_track(&self, transceiver: SharedPtr<RtpTransceiver>);
+    fn on_remove_track(&self, receiver: SharedPtr<RtpReceiver>);
+    fn on_interesting_usage(&self, usage_pattern: i32);
+    /// CallXL: the ICE controller switched the selected pair (network thread).
+    fn on_ice_controller_decision(&self, _reason: String) {}
+}
+
+// Wrapper for PeerConnectionObserver because cxx doesn't support dyn Trait on c++
+// https://github.com/dtolnay/cxx/issues/665
+pub struct PeerConnectionObserverWrapper {
+    observer: Arc<dyn PeerConnectionObserver>,
+}
+
+impl PeerConnectionObserverWrapper {
+    pub fn new(observer: Arc<dyn PeerConnectionObserver>) -> Self {
+        Self { observer }
+    }
+
+    fn on_signaling_change(&self, new_state: ffi::SignalingState) {
+        self.observer.on_signaling_change(new_state);
+    }
+
+    fn on_add_stream(&self, stream: SharedPtr<MediaStream>) {
+        self.observer.on_add_stream(stream);
+    }
+
+    fn on_remove_stream(&self, stream: SharedPtr<MediaStream>) {
+        self.observer.on_remove_stream(stream);
+    }
+
+    fn on_data_channel(&self, data_channel: SharedPtr<DataChannel>) {
+        self.observer.on_data_channel(data_channel);
+    }
+
+    fn on_renegotiation_needed(&self) {
+        self.observer.on_renegotiation_needed();
+    }
+
+    fn on_negotiation_needed_event(&self, event: u32) {
+        self.observer.on_negotiation_needed_event(event);
+    }
+
+    fn on_ice_connection_change(&self, new_state: ffi::IceConnectionState) {
+        self.observer.on_ice_connection_change(new_state);
+    }
+
+    fn on_standardized_ice_connection_change(&self, new_state: ffi::IceConnectionState) {
+        self.observer.on_standardized_ice_connection_change(new_state);
+    }
+
+    fn on_connection_change(&self, new_state: ffi::PeerConnectionState) {
+        self.observer.on_connection_change(new_state);
+    }
+
+    fn on_ice_gathering_change(&self, new_state: ffi::IceGatheringState) {
+        self.observer.on_ice_gathering_change(new_state);
+    }
+
+    fn on_ice_candidate(&self, candidate: SharedPtr<IceCandidate>) {
+        self.observer.on_ice_candidate(candidate);
+    }
+
+    fn on_ice_candidate_error(
+        &self,
+        address: String,
+        port: i32,
+        url: String,
+        error_code: i32,
+        error_text: String,
+    ) {
+        self.observer.on_ice_candidate_error(address, port, url, error_code, error_text);
+    }
+
+    fn on_ice_candidates_removed(&self, candidates: Vec<ffi::CandidatePtr>) {
+        self.observer.on_ice_candidates_removed(candidates.into_iter().map(|v| v.ptr).collect());
+    }
+
+    fn on_ice_connection_receiving_change(&self, receiving: bool) {
+        self.observer.on_ice_connection_receiving_change(receiving);
+    }
+
+    fn on_ice_selected_candidate_pair_changed(&self, event: ffi::CandidatePairChangeEvent) {
+        self.observer.on_ice_selected_candidate_pair_changed(event);
+    }
+
+    fn on_add_track(&self, receiver: SharedPtr<RtpReceiver>, streams: Vec<ffi::MediaStreamPtr>) {
+        self.observer.on_add_track(receiver, streams.into_iter().map(|v| v.ptr).collect());
+    }
+
+    fn on_track(&self, transceiver: SharedPtr<RtpTransceiver>) {
+        self.observer.on_track(transceiver);
+    }
+
+    fn on_remove_track(&self, receiver: SharedPtr<RtpReceiver>) {
+        self.observer.on_remove_track(receiver);
+    }
+
+    fn on_interesting_usage(&self, usage_pattern: i32) {
+        self.observer.on_interesting_usage(usage_pattern);
+    }
+
+    fn on_ice_controller_decision(&self, reason: String) {
+        self.observer.on_ice_controller_decision(reason);
+    }
+}

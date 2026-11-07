@@ -1,0 +1,5 @@
+[bindings.swift]
+module_name = "CallXLCore"
+ffi_module_name = "CallXLCoreFFI"
+ffi_module_filename = "CallXLCoreFFI"
+generate_module_map = true

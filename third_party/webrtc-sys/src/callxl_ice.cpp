@@ -1,0 +1,426 @@
+/*
+ * CallXL: ICE controller implementing CLAUDE.md section 4 "dynamic path
+ * switching". MIT, CallXL authors.
+ *
+ * CallXlIceController wraps libwebrtc's BasicIceController and delegates all
+ * pinging, pruning and nomination to it. Only the *switch* decisions of the
+ * controlling agent are filtered once a pair is selected and stable:
+ *   - an alternative must beat the selected pair by >= rtt_delta_ms RTT, or by
+ *     >= loss_delta STUN-ping loss, or be IPv6 while the selected pair is IPv4
+ *     and not worse (rtt within v6_bonus_ms, loss within 0.5 %),
+ *   - continuously for sustain_ms,
+ *   - and at least cooldown_ms after the previous switch.
+ * Failover (selected pair destroyed / not writable / not receiving) is never
+ * delayed. During the initial grace period a usable IPv6 pair that is not worse
+ * replaces an IPv4 pick (IPv6 preference at setup). The controlled agent
+ * follows nominations, except that for kControlledFlapGuardMs after a change
+ * it ignores DATA_RECEIVED switches back to the pair it just left: packets
+ * still in flight on the old (slower) path otherwise flip the selection on every packet (CI: 9 flips in 60 ms after one
+ * controlling-side switch away from a 60 ms-delayed IPv6 path).
+ * The controller runs on the network thread; it reports each switch it makes
+ * through PeerConnectionObserverWrapper::on_ice_controller_decision, which on
+ * the Rust side does exactly one try_send.
+ */
+#include <cstdlib>
+#include <map>
+#include <string>
+
+#include "livekit/callxl.h"
+#include "livekit/peer_connection_factory.h"
+#include "p2p/base/basic_ice_controller.h"
+#include "p2p/base/connection.h"
+#include "p2p/base/default_ice_transport_factory.h"
+#include "p2p/base/ice_controller_factory_interface.h"
+#include "p2p/base/p2p_transport_channel.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/time_utils.h"
+#include "webrtc-sys/src/peer_connection_factory.rs.h"
+
+namespace callxl {
+namespace {
+
+using webrtc::Connection;
+using webrtc::IceControllerInterface;
+using webrtc::IceSwitchReason;
+
+// Why an alternative pair currently qualifies for a switch. Formatted into a
+// string only when a switch is actually made (no allocation per recheck).
+enum class Why : uint8_t { kNone, kRtt, kLoss, kPreferV6 };
+
+struct ConnMetrics {
+  int64_t last_sample_ms = -1;
+  size_t last_sent = 0;
+  size_t last_recv = 0;
+  float loss = 0.f;  // EWMA of per-sample ping loss fraction
+  int64_t lost = 0;  // pings known lost (cumulative)
+  int rtt_n = 0;       // rtt_samples() at the last RTT update
+  float rtt_ms = -1.f; // EWMA (0.7 new) of the latest per-response RTT
+  int64_t qualifying_since_ms = -1;
+  Why why = Why::kNone;
+};
+
+constexpr int64_t kControlledFlapGuardMs = 1000;
+
+bool IsV6(const Connection* c) {
+  return c->local_candidate().address().family() == AF_INET6;
+}
+
+class CallXlIceController final : public IceControllerInterface {
+ public:
+  CallXlIceController(const webrtc::IceControllerFactoryArgs& args,
+                      IcePolicy policy,
+                      const livekit_ffi::PeerConnectionObserverWrapper* observer)
+      : inner_(args),
+        role_(args.ice_role_func),
+        policy_(policy),
+        observer_(observer),
+        trace_(std::getenv("CALLXL_ICE_TRACE") != nullptr) {}
+
+  void SetIceConfig(const webrtc::IceConfig& config) override {
+    inner_.SetIceConfig(config);
+  }
+  void SetSelectedConnection(const Connection* c) override {
+    inner_.SetSelectedConnection(c);
+    if (c && c != selected_) {
+      const int64_t now = webrtc::TimeMillis();
+      if (first_selected_ms_ < 0) first_selected_ms_ = now;
+      previous_selected_ = selected_;
+      selected_changed_ms_ = now;
+      selected_ = c;
+      for (auto& kv : metrics_) kv.second.qualifying_since_ms = -1;
+    } else if (!c) {
+      selected_ = nullptr;
+    }
+  }
+  // Metrics nodes are created here and erased in OnConnectionDestroyed, so the
+  // recheck path (Sample/RttMs/Filter) only looks them up and never inserts.
+  void AddConnection(const Connection* c) override {
+    inner_.AddConnection(c);
+    metrics_.emplace(c, ConnMetrics{});
+  }
+  void OnConnectionDestroyed(const Connection* c) override {
+    inner_.OnConnectionDestroyed(c);
+    metrics_.erase(c);
+    if (selected_ == c) selected_ = nullptr;
+    if (previous_selected_ == c) previous_selected_ = nullptr;
+  }
+  std::span<const Connection* const> GetConnections() const override {
+    return inner_.GetConnections();
+  }
+  bool HasPingableConnection() const override {
+    return inner_.HasPingableConnection();
+  }
+  PingResult GetConnectionToPing(webrtc::Timestamp last_ping_sent) override {
+    return inner_.GetConnectionToPing(last_ping_sent);
+  }
+  bool GetUseCandidateAttr(const Connection* c,
+                           webrtc::NominationMode mode,
+                           webrtc::IceMode remote_ice_mode) const override {
+    return inner_.GetUseCandidateAttr(c, mode, remote_ice_mode);
+  }
+  const Connection* FindNextPingableConnection() override {
+    return inner_.FindNextPingableConnection();
+  }
+  void MarkConnectionPinged(const Connection* c) override {
+    inner_.MarkConnectionPinged(c);
+  }
+  std::vector<const Connection*> PruneConnections() override {
+    return inner_.PruneConnections();
+  }
+
+  SwitchResult ShouldSwitchConnection(IceSwitchReason reason,
+                                      const Connection* c) override {
+    return Filter(reason, inner_.ShouldSwitchConnection(reason, c));
+  }
+  SwitchResult SortAndSwitchConnection(IceSwitchReason reason) override {
+    return Filter(reason, inner_.SortAndSwitchConnection(reason));
+  }
+
+ private:
+  // Ping loss per connection. A ping counts as lost only once it can no longer be
+  // in flight: lost = outstanding (sent - responses) minus the pings sent within
+  // the last RTT + 50 ms (at least one). Counting every unanswered ping at sample
+  // time instead read pings in flight as lost (EWMA spikes to 0.3 on a loss-free
+  // path), which kept the prefer-IPv6 rule from ever holding for sustain_ms.
+  void Sample(int64_t now) {
+    for (const Connection* c : inner_.GetConnections()) {
+      ConnMetrics* mp = Find(c);
+      if (!mp) continue;
+      ConnMetrics& m = *mp;
+      if (m.last_sample_ms >= 0 && now - m.last_sample_ms < 250) continue;
+      webrtc::ConnectionInfo info = const_cast<Connection*>(c)->stats();
+      const int64_t sent = static_cast<int64_t>(info.sent_ping_requests_total);
+      const int64_t recv = static_cast<int64_t>(info.recv_ping_responses);
+      if (m.last_sample_ms >= 0 && sent > static_cast<int64_t>(m.last_sent)) {
+        const int64_t ds = sent - static_cast<int64_t>(m.last_sent);
+        const int64_t dt = now - m.last_sample_ms;
+        const int64_t rtt = c->rtt_samples() > 0 ? c->Rtt().ms() : 1000;
+        int64_t in_flight = (ds * (rtt + 50) + dt - 1) / (dt > 0 ? dt : 1);
+        if (in_flight < 1) in_flight = 1;
+        int64_t lost = sent - recv - in_flight;
+        if (lost < m.lost) lost = m.lost;  // monotone: answered pings are not "unlost"
+        const float l = static_cast<float>(lost - m.lost) / static_cast<float>(ds);
+        m.lost = lost;
+        m.loss = 0.7f * m.loss + 0.3f * (l > 1.f ? 1.f : l);
+      } else if (m.last_sample_ms < 0) {
+        m.lost = sent - recv - 1 > 0 ? sent - recv - 1 : 0;
+      }
+      // libwebrtc's Connection::Rtt() weighs history 3:1 and backup pairs get a
+      // response only every 2-5 s, so after a path recovers it stays stale for
+      // tens of seconds (CI run 42348934002: 7 ms on a ~0 ms IPv6 pair, above the
+      // 5 ms IPv6 bonus, so the call never returned to IPv6). The policy uses the
+      // latest RTT samples instead, weighted 0.7 new.
+      if (c->rtt_samples() != m.rtt_n && info.current_round_trip_time_ms) {
+        const float x = static_cast<float>(*info.current_round_trip_time_ms);
+        m.rtt_ms = m.rtt_ms < 0.f ? x : 0.3f * m.rtt_ms + 0.7f * x;
+        m.rtt_n = c->rtt_samples();
+      }
+      m.last_sent = static_cast<size_t>(sent);
+      m.last_recv = static_cast<size_t>(recv);
+      m.last_sample_ms = now;
+    }
+  }
+
+  // Debug trace of the switching policy's inputs (every 2 s, controlling side).
+  // Off unless CALLXL_ICE_TRACE is set (read once): it allocates on the network
+  // thread, which production builds must not do (CLAUDE.md section 10).
+  void Trace(int64_t now) {
+    if (!trace_ || now - last_trace_ms_ < 2000) return;
+    last_trace_ms_ = now;
+    std::string t = "CallXL ICE eval:";
+    for (const Connection* c : inner_.GetConnections()) {
+      const ConnMetrics& m = Get(c);
+      t += std::string(" [") + (c == selected_ ? "*" : "") + (IsV6(c) ? "v6" : "v4") +
+           " w" + std::to_string(c->writable()) + " r" + std::to_string(c->receiving()) +
+           " n" + std::to_string(c->rtt_samples()) + " rtt" + std::to_string(c->Rtt().ms()) + "/" +
+           std::to_string(m.rtt_ms < 0.f ? -1 : static_cast<int>(m.rtt_ms)) +
+           " loss" + std::to_string(static_cast<int>(m.loss * 1000)) + "/1000 q" +
+           std::to_string(m.qualifying_since_ms < 0 ? -1 : now - m.qualifying_since_ms) + "]";
+    }
+    RTC_LOG(LS_INFO) << t;
+  }
+
+  ConnMetrics* Find(const Connection* c) {
+    auto it = metrics_.find(c);
+    return it == metrics_.end() ? nullptr : &it->second;
+  }
+  const ConnMetrics& Get(const Connection* c) {
+    static const ConnMetrics kEmpty;
+    const ConnMetrics* m = Find(c);
+    return m ? *m : kEmpty;
+  }
+
+  int64_t RttMs(const Connection* c) {
+    const ConnMetrics& m = Get(c);
+    return m.rtt_ms >= 0.f ? static_cast<int64_t>(m.rtt_ms + 0.5f) : c->Rtt().ms();
+  }
+
+  bool Usable(const Connection* c) const {
+    return c && c->writable() && c->receiving() && c->rtt_samples() > 0;
+  }
+
+  SwitchResult Recheck(int64_t now) {
+    SwitchResult r;
+    if (recheck_pending_until_ms_ < now) {
+      recheck_pending_until_ms_ = now + policy_.recheck_ms;
+      r.recheck_event = webrtc::IceRecheckEvent(
+          IceSwitchReason::ICE_CONTROLLER_RECHECK, policy_.recheck_ms);
+    }
+    return r;
+  }
+
+  void Report(const std::string& what) {
+    if (observer_) observer_->on_ice_controller_decision(rust::String(what));
+  }
+
+  SwitchResult Filter(IceSwitchReason reason, SwitchResult inner) {
+    const int64_t now = webrtc::TimeMillis();
+    // Our recheck fired (or libwebrtc's own): allow the next one. Any recheck in
+    // the second half of the pending window counts as ours; with the old 1 ms
+    // tolerance a timer firing >= 2 ms early ended the chain and, in a stable
+    // call with no other sorts, the policy silently stopped (CI run 42353230208:
+    // no evaluation at all on either side of netem_path_switch_v4_to_v6).
+    if (reason == IceSwitchReason::ICE_CONTROLLER_RECHECK &&
+        recheck_pending_until_ms_ <= now + policy_.recheck_ms / 2) {
+      recheck_pending_until_ms_ = -1;
+    }
+    Sample(now);
+
+    // Controlled side follows the controlling agent's nominations, without
+    // flapping back on late packets from the path it just left.
+    if (role_ && role_() != webrtc::ICEROLE_CONTROLLING) {
+      if (reason == IceSwitchReason::DATA_RECEIVED && inner.connection &&
+          *inner.connection && *inner.connection == previous_selected_ &&
+          selected_ && Usable(selected_) &&
+          now - selected_changed_ms_ < kControlledFlapGuardMs) {
+        return SwitchResult{};
+      }
+      return inner;
+    }
+
+    // No usable selection yet, failover, or initial settling: libwebrtc decides.
+    const bool selected_ok = selected_ && Usable(selected_);
+    const bool in_grace = first_selected_ms_ < 0 ||
+                          now - first_selected_ms_ < policy_.initial_grace_ms;
+    if (!selected_ok || in_grace) {
+      if (inner.connection && *inner.connection && *inner.connection != selected_ &&
+          selected_ && !in_grace) {
+        last_switch_ms_ = now;
+        Report("failover");
+      }
+      // IPv6 preference at setup (section 4): libwebrtc selects whichever pair
+      // became writable first; while settling, take a usable IPv6 pair that is
+      // not worse than the IPv4 pick (RTT within v6_bonus_ms). Inside the grace
+      // period this is the initial choice, not a counted switch.
+      if (in_grace) {
+        const Connection* pick =
+            inner.connection && *inner.connection ? *inner.connection : selected_;
+        if (pick && !IsV6(pick) && Usable(pick)) {
+          const Connection* v6 = nullptr;
+          for (const Connection* c : inner_.GetConnections()) {
+            if (!IsV6(c) || !Usable(c) ||
+                c->local_candidate().component() != pick->local_candidate().component() ||
+                RttMs(c) > RttMs(pick) + policy_.v6_bonus_ms)
+              continue;
+            if (!v6 || RttMs(c) < RttMs(v6)) v6 = c;
+          }
+          if (v6 && v6 != selected_) inner.connection = v6;
+        }
+      }
+      // Keep a recheck chain alive: in a stable call libwebrtc requests no sorts at
+      // all, so without it the policy below would never be evaluated (observed: no
+      // decision in 12 s with the selected IPv6 pair at 120 ms RTT vs ~0 ms IPv4).
+      if (!inner.recheck_event) inner.recheck_event = Recheck(now).recheck_event;
+      return inner;
+    }
+
+    // Stable selection: apply the CallXL policy.
+    Trace(now);
+    const ConnMetrics& sm = Get(selected_);
+    const int64_t sel_rtt = RttMs(selected_);
+    const Connection* best = nullptr;
+    int64_t best_since = INT64_MAX;
+    for (const Connection* c : inner_.GetConnections()) {
+      if (c == selected_) continue;
+      ConnMetrics* mp = Find(c);
+      if (!mp) continue;
+      ConnMetrics& m = *mp;
+      m.why = Why::kNone;
+      if (Usable(c) && c->local_candidate().component() ==
+                           selected_->local_candidate().component()) {
+        const int64_t rtt = RttMs(c);
+        if (sel_rtt - rtt >= policy_.rtt_delta_ms) {
+          m.why = Why::kRtt;
+        } else if (sm.loss - m.loss >= policy_.loss_delta) {
+          m.why = Why::kLoss;
+        } else if (IsV6(c) && !IsV6(selected_) &&
+                   rtt <= sel_rtt + policy_.v6_bonus_ms &&
+                   m.loss <= sm.loss + 0.005f) {
+          m.why = Why::kPreferV6;
+        }
+      }
+      if (m.why == Why::kNone) {
+        m.qualifying_since_ms = -1;
+        continue;
+      }
+      if (m.qualifying_since_ms < 0) m.qualifying_since_ms = now;
+      if (m.qualifying_since_ms < best_since) {
+        best_since = m.qualifying_since_ms;
+        best = c;
+      }
+    }
+
+    const bool cooled = last_switch_ms_ < 0 || now - last_switch_ms_ >= policy_.cooldown_ms;
+    if (best && cooled && now - best_since >= policy_.sustain_ms) {
+      last_switch_ms_ = now;
+      SwitchResult r;
+      r.connection = best;
+      recheck_pending_until_ms_ = now + policy_.recheck_ms;
+      r.recheck_event = webrtc::IceRecheckEvent(
+          IceSwitchReason::ICE_CONTROLLER_RECHECK, policy_.recheck_ms);
+      // The only string formatting on this path: once per switch.
+      const ConnMetrics& bm = Get(best);
+      std::string reason;
+      switch (bm.why) {
+        case Why::kRtt:
+          reason = "rtt " + std::to_string(sel_rtt) + "->" +
+                   std::to_string(RttMs(best)) + " ms";
+          break;
+        case Why::kLoss:
+          reason = "loss " + std::to_string(static_cast<int>(sm.loss * 100)) +
+                   "->" + std::to_string(static_cast<int>(bm.loss * 100)) + " %";
+          break;
+        case Why::kPreferV6:
+          reason = "prefer-ipv6";
+          break;
+        case Why::kNone:
+          break;
+      }
+      Report(std::string(IsV6(selected_) ? "v6" : "v4") + "->" +
+             (IsV6(best) ? "v6" : "v4") + ": " + reason);
+      return r;
+    }
+    // Suppress libwebrtc's own priority-based re-sorting; re-evaluate soon.
+    return Recheck(now);
+  }
+
+  webrtc::BasicIceController inner_;
+  std::function<webrtc::IceRole()> role_;
+  IcePolicy policy_;
+  const livekit_ffi::PeerConnectionObserverWrapper* observer_;
+  std::map<const Connection*, ConnMetrics> metrics_;
+  const Connection* selected_ = nullptr;
+  const Connection* previous_selected_ = nullptr;
+  int64_t selected_changed_ms_ = -1;
+  int64_t first_selected_ms_ = -1;
+  int64_t last_switch_ms_ = -1;
+  int64_t recheck_pending_until_ms_ = -1;
+  int64_t last_trace_ms_ = -1;
+  const bool trace_;
+};
+
+class CallXlIceControllerFactory final
+    : public webrtc::IceControllerFactoryInterface {
+ public:
+  CallXlIceControllerFactory(IcePolicy policy,
+                             const livekit_ffi::PeerConnectionObserverWrapper* obs)
+      : policy_(policy), observer_(obs) {}
+  std::unique_ptr<IceControllerInterface> Create(
+      const webrtc::IceControllerFactoryArgs& args) override {
+    return std::make_unique<CallXlIceController>(args, policy_, observer_);
+  }
+
+ private:
+  IcePolicy policy_;
+  const livekit_ffi::PeerConnectionObserverWrapper* observer_;
+};
+
+class CallXlIceTransportFactory final : public webrtc::IceTransportFactory {
+ public:
+  CallXlIceTransportFactory(IcePolicy policy,
+                            const livekit_ffi::PeerConnectionObserverWrapper* obs)
+      : controller_factory_(policy, obs) {}
+
+  webrtc::scoped_refptr<webrtc::IceTransportInterface> CreateIceTransport(
+      const std::string& transport_name,
+      int component,
+      webrtc::IceTransportInit init) override {
+    init.set_ice_controller_factory(&controller_factory_);
+    return webrtc::make_ref_counted<webrtc::DefaultIceTransport>(
+        webrtc::P2PTransportChannel::Create(transport_name, component,
+                                            std::move(init)));
+  }
+
+ private:
+  CallXlIceControllerFactory controller_factory_;
+};
+
+}  // namespace
+
+std::unique_ptr<webrtc::IceTransportFactory> CreateCallXlIceTransportFactory(
+    IcePolicy policy,
+    const livekit_ffi::PeerConnectionObserverWrapper* observer) {
+  return std::make_unique<CallXlIceTransportFactory>(policy, observer);
+}
+
+}  // namespace callxl

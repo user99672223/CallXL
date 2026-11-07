@@ -1,0 +1,27 @@
+# Vendored fork of crates.io webrtc-sys 0.3.53 (Apache-2.0, LiveKit, Inc.).
+# CallXL additions are listed in CALLXL_CHANGES.md.
+[package]
+edition = "2021"
+name = "webrtc-sys"
+version = "0.3.53"
+build = "build.rs"
+description = "Unsafe bindings to libwebrtc (CallXL fork)"
+homepage = "https://livekit.io"
+license = "Apache-2.0"
+repository = "https://github.com/livekit/rust-sdks"
+publish = false
+
+[lib]
+name = "webrtc_sys"
+path = "src/lib.rs"
+
+[dependencies]
+cxx = "1.0"
+log = "0.4"
+
+[build-dependencies]
+cc = { version = "1.0", features = ["parallel"] }
+cxx-build = "1.0"
+glob = "0.3"
+pkg-config = "0.3.22"
+webrtc-sys-build = "=0.3.21"
