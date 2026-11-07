@@ -98,23 +98,41 @@ async fn diagnostics_complete() -> Result<()> {
     }
     eprintln!("{} sparklines, all §7 ones with 5..=60 samples", series.len());
 
-    // Export: JSON text with the series, also written to the download folder.
+    // Export (schema v1, docs/diagnostics-export.md): validates, carries the live metrics
+    // and the log tail, is redacted, and the copy in the download folder is identical.
     let text = a.call("export_diagnostics", Value::Null).await?;
-    let report: Value = serde_json::from_str(text.as_str().unwrap_or_default())?;
-    ensure!(report["diagnostics"]["series"].as_array().is_some_and(|s| !s.is_empty()), "export lacks series");
-    ensure!(report["log"].as_array().is_some_and(|l| !l.is_empty()), "export lacks the log ring");
+    let text = text.as_str().unwrap_or_default();
+    let report: Value = serde_json::from_str(text)?;
+    h.save_json("alice-export.json", &report);
+    if let Err(errs) = diag_schema::validate(&report) {
+        anyhow::bail!("export does not validate against schema v1:\n{}", errs.join("\n"));
+    }
+    ensure!(report["peers"].as_array().map_or(0, Vec::len) == 1, "export peers {}", report["peers"]);
+    let ep = &report["peers"][0];
+    ensure!(ep["key"] == b.key.as_str() && ep["tag"] == tag, "export peer key/tag");
+    ensure!(ep["path"]["kind"] == expect && ep["stats"]["opus_frame_ms"].is_u64(), "export peer path/stats");
+    ensure!(report["call"]["state"] == "InCall" && report["call"]["self"]["display_name"] == "alice", "export call");
+    for m in &want {
+        let n = report["series"][m.as_str()].as_array().map_or(0, Vec::len);
+        ensure!((5..=60).contains(&n), "export series {m}: {n} samples");
+    }
+    ensure!(report["log_tail"].as_array().is_some_and(|l| !l.is_empty()), "export lacks the log tail");
+    ensure!(!text.contains("\"bob\"") && !text.contains(" bob "), "the peer's display name leaked into the export");
     let dir = a.data_dir.join("downloads");
     let files: Vec<_> = std::fs::read_dir(&dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().starts_with("callxl-diagnostics-"))
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.starts_with("CallXL-diagnostics-") && n.ends_with(".json")
+        })
         .collect();
     ensure!(files.len() == 1, "export not written to {}", dir.display());
-    let on_disk: Value = serde_json::from_slice(&std::fs::read(files[0].path())?)?;
-    ensure!(on_disk["diagnostics"]["series"] == report["diagnostics"]["series"], "file differs from returned text");
+    ensure!(std::fs::read_to_string(files[0].path())? == text, "file differs from returned text");
     eprintln!(
-        "export: {} bytes, {} log lines, written to {}",
-        text.as_str().map_or(0, str::len),
-        report["log"].as_array().map_or(0, Vec::len),
+        "export: schema v1 valid, {} bytes, {} series, {} log lines, written to {}",
+        text.len(),
+        report["series"].as_object().map_or(0, |o| o.len()),
+        report["log_tail"].as_array().map_or(0, Vec::len),
         files[0].path().display()
     );
     netem.clear()?;
