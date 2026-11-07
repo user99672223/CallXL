@@ -368,7 +368,16 @@ pub async fn sample_every(peer: &Peer, t0: Instant, secs: f64, every: Duration) 
         let d = peer.diagnostics().await?;
         if let Some(p) = d["peers"].get(0) {
             let mut p = p.clone();
-            p["t"] = json!((Instant::now() - t0).as_secs_f64());
+            let t = (Instant::now() - t0).as_secs_f64();
+            p["t"] = json!(t);
+            // When the returned stats were taken: the collector ticks at its own 1 Hz phase,
+            // so a polled value can be up to a period old. Windows that attribute a value to
+            // an event ("within 10 s of loss onset") use this, not the poll time.
+            let age_s = d["ts_ms"]
+                .as_u64()
+                .map(|ts| (callxl_signal::now_ms().saturating_sub(ts)) as f64 / 1000.0)
+                .unwrap_or(0.0);
+            p["t_stats"] = json!(t - age_s.min(every.as_secs_f64() * 2.0));
             p["ana_frame_ms"] = d["global"]["ana_frame_ms"].clone();
             p["ana_loss_pct"] = d["global"]["ana_uplink_loss_pct"].clone();
             eprintln!("{} {}", peer.name, brief(&p));
@@ -380,8 +389,9 @@ pub async fn sample_every(peer: &Peer, t0: Instant, secs: f64, every: Duration) 
 
 pub fn brief(p: &Value) -> String {
     format!(
-        "t={:>5.1} send={:>6.1} target={:>6.1} payload={:>6.1} bwe={:>5.0} frame={} ana={}/{:.1}% rtt={:>5.1} loss={:>4.1}/{:>4.1} path={}/{}@{} sw={}",
+        "t={:>5.1} ts={:>5.1} send={:>6.1} target={:>6.1} payload={:>6.1} bwe={:>5.0} frame={} ana={}/{:.1}% rtt={:>5.1} loss={:>4.1}/{:>4.1} path={}/{}@{} sw={}",
         p["t"].as_f64().unwrap_or(0.0),
+        p["t_stats"].as_f64().unwrap_or(0.0),
         p["send_kbps"].as_f64().unwrap_or(0.0),
         p["opus_bitrate_kbps"].as_f64().unwrap_or(0.0),
         p["opus_payload_kbps"].as_f64().unwrap_or(0.0),
