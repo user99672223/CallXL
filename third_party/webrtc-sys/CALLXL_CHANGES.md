@@ -52,10 +52,6 @@ and a high-resolution waitable timer there, `clock_nanosleep(CLOCK_MONOTONIC)` e
 sleeps (`std::this_thread::sleep_for`) for the time left until the same absolute
 `CLOCK_MONOTONIC` deadline. Linux and Windows paths are unchanged.
 
-`src/callxl_test_adm.cpp`: Apple has no `clock_nanosleep`; on `__APPLE__` the test ADM's
-10 ms loop sleeps (`std::this_thread::sleep_for`) for the time left until the same
-absolute `CLOCK_MONOTONIC` deadline. The Linux path is unchanged.
-
 `src/callxl.cpp` (iOS only): the CallXL factory gets video encoder/decoder factories with
 no formats instead of livekit's (which wrap libwebrtc's ObjC default codec factories), so
 the H.264/VP8/VP9/AV1 stacks are dead-stripped from the iOS dylib. CallXL is audio-only.
