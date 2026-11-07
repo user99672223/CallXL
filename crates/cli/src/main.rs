@@ -195,11 +195,22 @@ async fn dispatch(core: &Arc<CallXl>, cmd: &str, args: &Value) -> Result<Value> 
     })
 }
 
+type Backlog = Arc<std::sync::Mutex<Option<Vec<String>>>>;
+
+/// A new control client: live events from now on, plus (first client only) the events
+/// emitted before any client was connected.
+fn attach(tx: &broadcast::Sender<String>, backlog: &Backlog) -> (broadcast::Receiver<String>, Vec<String>) {
+    let mut g = backlog.lock().unwrap();
+    let rx = tx.subscribe();
+    (rx, g.take().unwrap_or_default())
+}
+
 async fn serve_conn<R, W>(
     core: Arc<CallXl>,
     r: R,
     w: W,
     mut events: broadcast::Receiver<String>,
+    replay: Vec<String>,
     stop: Arc<tokio::sync::Notify>,
 ) where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
@@ -208,6 +219,12 @@ async fn serve_conn<R, W>(
     let w = Arc::new(Mutex::new(w));
     let ew = w.clone();
     let ev_task = tokio::spawn(async move {
+        for line in replay {
+            let mut g = ew.lock().await;
+            if g.write_all(line.as_bytes()).await.is_err() || g.write_all(b"\n").await.is_err() {
+                return;
+            }
+        }
         loop {
             match events.recv().await {
                 Ok(line) => {
@@ -298,11 +315,24 @@ async fn main() -> Result<()> {
     let core2 = core.clone();
     tokio::task::spawn_blocking(move || core2.start()).await?.map_err(|e| anyhow!(e.to_string()))?;
     let (ev_tx, _) = broadcast::channel::<String>(4096);
+    // Events emitted before the first control client connects (e.g. a TrustPrompt from
+    // a LAN hello within ms of start) are kept and replayed to that client. Under one
+    // lock the forwarder either appends to the backlog or broadcasts, and the acceptor
+    // subscribes and takes the backlog, so nothing is lost or duplicated.
+    let backlog: Backlog = Arc::new(std::sync::Mutex::new(Some(Vec::new())));
     let tx = ev_tx.clone();
+    let bl = backlog.clone();
     tokio::spawn(async move {
         while let Some(e) = stream.recv().await {
             let line = json!({"event": e.name(), "data": e.data()}).to_string();
-            let _ = tx.send(line);
+            let mut g = bl.lock().unwrap();
+            match g.as_mut() {
+                Some(v) if v.len() < 4096 => v.push(line),
+                Some(_) => {}
+                None => {
+                    let _ = tx.send(line);
+                }
+            }
         }
     });
 
@@ -314,11 +344,12 @@ async fn main() -> Result<()> {
         let _ = std::fs::remove_file(path);
         let listener = tokio::net::UnixListener::bind(path).with_context(|| format!("bind {path}"))?;
         println!("{}", json!({"ready": true, "control": control, "lan": lan, "key": card.signing_key}));
-        let (c, t, st) = (core.clone(), ev_tx.clone(), stop.clone());
+        let (c, t, st, bl) = (core.clone(), ev_tx.clone(), stop.clone(), backlog.clone());
         tokio::spawn(async move {
             while let Ok((sock, _)) = listener.accept().await {
                 let (r, w) = sock.into_split();
-                tokio::spawn(serve_conn(c.clone(), r, w, t.subscribe(), st.clone()));
+                let (rx, replay) = attach(&t, &bl);
+                tokio::spawn(serve_conn(c.clone(), r, w, rx, replay, st.clone()));
             }
         });
     } else if let Some(addr) = control.strip_prefix("tcp://") {
@@ -328,12 +359,13 @@ async fn main() -> Result<()> {
             "{}",
             json!({"ready": true, "control": format!("tcp://{bound}"), "lan": lan, "key": card.signing_key})
         );
-        let (c, t, st) = (core.clone(), ev_tx.clone(), stop.clone());
+        let (c, t, st, bl) = (core.clone(), ev_tx.clone(), stop.clone(), backlog.clone());
         tokio::spawn(async move {
             while let Ok((sock, _)) = listener.accept().await {
                 let _ = sock.set_nodelay(true);
                 let (r, w) = sock.into_split();
-                tokio::spawn(serve_conn(c.clone(), r, w, t.subscribe(), st.clone()));
+                let (rx, replay) = attach(&t, &bl);
+                tokio::spawn(serve_conn(c.clone(), r, w, rx, replay, st.clone()));
             }
         });
     } else {

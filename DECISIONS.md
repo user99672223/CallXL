@@ -331,3 +331,17 @@ period instead of 1 s), `CALLXL_RTC_LOG` (`a|b|…` substrings of libwebrtc log 
 print, `*` for all; the sink runs on libwebrtc threads), `CALLXL_ICE_TRACE` (ICE policy
 inputs every 2 s; allocates on the network thread). Build-time, not debug:
 `CALLXL_APP_SECRET` (§5, from the CI secret).
+
+D-0038 (2026-11-07, phase1) — Two timing races exposed by CI run 42353230208 (both
+pre-existing, neither caused by the review fixes):
+(1) `callxl-cli` dropped events emitted before the first control client connected:
+`trust_flow_and_key_change` lost alice's TrustPrompt (the LAN hello to bob happens
+within ms of start). The CLI now keeps those events (≤ 4096) and replays them to the
+first client; one lock makes "append to backlog" vs "broadcast" and "subscribe + take
+backlog" atomic, so nothing is lost or duplicated. Check: a client connecting 2 s after
+the LAN hello receives exactly 1 TrustPrompt.
+(2) The ICE controller's recheck chain (D-0026) accepted a firing only ≤ 1 ms before its
+due time; a timer firing ≥ 2 ms early ended the chain and the switching policy stopped
+for the rest of the call (no evaluation at all on either side of
+`netem_path_switch_v4_to_v6`, which therefore never returned to IPv6). Any recheck in the
+second half of the pending window now counts.

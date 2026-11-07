@@ -235,8 +235,13 @@ class CallXlIceController final : public IceControllerInterface {
 
   SwitchResult Filter(IceSwitchReason reason, SwitchResult inner) {
     const int64_t now = webrtc::TimeMillis();
+    // Our recheck fired (or libwebrtc's own): allow the next one. Any recheck in
+    // the second half of the pending window counts as ours; with the old 1 ms
+    // tolerance a timer firing >= 2 ms early ended the chain and, in a stable
+    // call with no other sorts, the policy silently stopped (CI run 42353230208:
+    // no evaluation at all on either side of netem_path_switch_v4_to_v6).
     if (reason == IceSwitchReason::ICE_CONTROLLER_RECHECK &&
-        recheck_pending_until_ms_ <= now + 1) {
+        recheck_pending_until_ms_ <= now + policy_.recheck_ms / 2) {
       recheck_pending_until_ms_ = -1;
     }
     Sample(now);
