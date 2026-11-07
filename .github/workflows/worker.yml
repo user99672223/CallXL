@@ -16,6 +16,11 @@ on:
       - "infra/worker/**"
       - ".github/workflows/worker.yml"
   workflow_dispatch:
+    inputs:
+      simulate_missing_secrets:
+        description: take the no-secrets path even if the secrets exist (proves the skip branch)
+        type: boolean
+        default: false
 
 concurrency:
   group: worker-${{ github.ref }}
@@ -40,7 +45,9 @@ jobs:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/claude/new-session-opnv54' || github.ref == 'refs/heads/main' }}
+          SIMULATE_MISSING: ${{ inputs.simulate_missing_secrets == true }}
         run: |
+          if [[ "$SIMULATE_MISSING" == "true" ]]; then CF_TOKEN=""; CF_ACCOUNT=""; echo "simulating missing secrets"; fi
           if [[ -z "$CF_TOKEN" || -z "$CF_ACCOUNT" ]]; then mode=skip
           elif [[ "$DEPLOY_REF" == "true" ]]; then mode=deploy
           else mode=dryrun; fi
