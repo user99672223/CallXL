@@ -109,8 +109,9 @@ pub struct Link {
     pub remote_hosts: Vec<(String, u16)>,
     /// Last selected pair as reported by libwebrtc (for reclassification).
     pub selected: Option<(callxl_media::CandidateInfo, callxl_media::CandidateInfo)>,
-    /// Bumped on every path-policy application (stale timers check it).
-    pub policy_generation: u64,
+    /// LAN start hold active since (D-0036), and media-carrying stats ticks seen in it.
+    pub lan_hold: Option<Instant>,
+    pub lan_hold_media_ticks: u8,
 }
 
 impl Link {
@@ -265,7 +266,8 @@ impl Core {
             throttle: Throttle::new(),
             remote_hosts: Vec::new(),
             selected: None,
-            policy_generation: 0,
+            lan_hold: None,
+            lan_hold_media_ticks: 0,
         };
         self.peer_ids.insert(id, key.to_string());
         let info = self.peer_info(&link);
@@ -552,12 +554,19 @@ impl Core {
     pub fn apply_path_policy(&mut self, key: &str) {
         let ceiling = self.settings.bitrate_ceiling_kbps;
         let Some(l) = self.links.get_mut(key) else { return };
-        l.policy_generation += 1;
-        let l = &*l;
         let Some(kind) = l.path_kind else { return };
         let p = policy::policy_for(kind, ceiling);
+        // LAN start hold (DECISIONS.md D-0036): the BWE minimum is held at the LAN start
+        // until media has flowed for a moment, then released to the normal floor with the
+        // start re-asserted. libwebrtc's initial probe goes out with the first media and,
+        // audio-only, can only measure what is being sent; its result overwrites the
+        // estimate (a LAN call then ramped from ~100-270 kbps instead of 510).
+        let lan = kind == MPathKind::Lan;
+        l.lan_hold = lan.then(Instant::now);
+        l.lan_hold_media_ticks = 0;
+        let min = if lan { p.bwe_start_bps } else { p.bwe_min_bps };
         self.engine.set_max_opus_bitrate((ceiling * 1000) as i32);
-        if let Err(e) = l.pc.set_bitrate(p.bwe_min_bps, Some(p.bwe_start_bps), p.bwe_max_bps) {
+        if let Err(e) = l.pc.set_bitrate(min, Some(p.bwe_start_bps), p.bwe_max_bps) {
             tracing::warn!("set_bitrate: {e}");
         }
         // No RtpSender encoding limits: SetParameters racing the send-stream setup left
@@ -565,38 +574,50 @@ impl Core {
         // WebRTC-Audio-Allocation already bounds the allocation (DECISIONS.md).
         l.pc.set_jitter_buffer_min_delay(p.jitter_buffer_min_delay);
         tracing::info!(
-            "path policy {} -> {:?}: start {} kbps, max {} kbps, jitter min {:?}",
+            "path policy {} -> {:?}: start {} kbps, min {} kbps, max {} kbps, jitter min {:?}",
             short(key),
             kind,
             p.bwe_start_bps / 1000,
+            min / 1000,
             p.bwe_max_bps / 1000,
             p.jitter_buffer_min_delay
         );
-        if kind == MPathKind::Lan {
-            // SetBitrate is applied asynchronously on libwebrtc's worker thread; when the
-            // transport becomes writable first, the initial probe runs at the creation
-            // start (128 kbps) and its result overwrites the delay-based estimate, so the
-            // LAN call ramps from ~100 kbps instead of starting at 510 (DECISIONS.md
-            // D-0029). Re-issuing the start once that probe is over fixes the estimate.
-            let (tx, key, generation) = (self.internal_tx.clone(), key.to_string(), l.policy_generation);
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(300)).await;
-                let _ = tx.send(Internal::ReassertLanStart { key, generation });
-            });
-        }
     }
 
-    pub fn reassert_lan_start(&mut self, key: &str, generation: u64) {
+    /// 1 Hz: ends the LAN start hold once media has flowed for 2 ticks and 2 s have
+    /// passed (start re-asserted if BWE is below it), at once on loss > 2 % (no
+    /// re-assert), at the latest after 10 s.
+    fn check_lan_hold(&mut self, key: &str, p: &PeerStats) {
         let ceiling = self.settings.bitrate_ceiling_kbps;
-        let Some(l) = self.links.get(key) else { return };
-        if l.policy_generation != generation || l.path_kind != Some(MPathKind::Lan) {
+        let Some(l) = self.links.get_mut(key) else { return };
+        let Some(since) = l.lan_hold else { return };
+        if p.send_kbps > 0.0 {
+            l.lan_hold_media_ticks = l.lan_hold_media_ticks.saturating_add(1);
+        }
+        let congested = p.loss_pct > 2.0 || p.remote_loss_pct > 2.0;
+        let held = since.elapsed();
+        let settled = l.lan_hold_media_ticks >= 2 && held >= Duration::from_secs(2);
+        if !(congested || settled || held >= Duration::from_secs(10)) {
             return;
         }
-        let p = policy::policy_for(MPathKind::Lan, ceiling);
-        if let Err(e) = l.pc.set_bitrate(p.bwe_min_bps, Some(p.bwe_start_bps), p.bwe_max_bps) {
+        l.lan_hold = None;
+        let pol = policy::policy_for(MPathKind::Lan, ceiling);
+        // Re-assert the start only if the estimate is below it (a probe pulled it down);
+        // re-issuing it over a higher estimate would lower BWE (measured dip 510 -> 465).
+        let low = p.available_outgoing_kbps * 1000.0 < f64::from(pol.bwe_start_bps);
+        let start = (!congested && low).then_some(pol.bwe_start_bps);
+        if let Err(e) = l.pc.set_bitrate(pol.bwe_min_bps, start, pol.bwe_max_bps) {
             tracing::warn!("set_bitrate: {e}");
         }
-        tracing::info!("path policy {} -> Lan: start {} kbps re-asserted", short(key), p.bwe_start_bps / 1000);
+        tracing::info!(
+            "path policy {}: LAN start hold released after {} ms (bwe {:.0} kbps, loss {:.1}/{:.1} %{})",
+            short(key),
+            held.as_millis(),
+            p.available_outgoing_kbps,
+            p.loss_pct,
+            p.remote_loss_pct,
+            if start.is_some() { ", start re-asserted" } else { "" }
+        );
     }
 
     pub async fn on_media(&mut self, ev: MediaEvent) {
@@ -777,6 +798,7 @@ impl Core {
             self.engine.apply_apm(self.settings.apm.to_media());
         }
         for p in &s.peers {
+            self.check_lan_hold(&p.peer_key, p);
             let Some(l) = self.links.get_mut(&p.peer_key) else { continue };
             let speaking = p.audio_level > 0.02;
             if speaking != l.speaking {

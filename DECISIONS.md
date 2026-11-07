@@ -299,3 +299,17 @@ stalled above the 5 ms IPv6 bonus for > 40 s while the real RTT was ~0 (CI run
 42347801925 with bob controlling only because that side got more samples). The sustain
 (5 s), cooldown (30 s) and Δ (15 ms) thresholds are unchanged. Local check on a stable
 49 ms path: own estimate 47–50 ms vs libwebrtc 49 ms.
+
+D-0036 (2026-11-07, phase1) — LAN start hold (supersedes the 300 ms re-assert of D-0029):
+on a LAN path the BWE *minimum* is held at the LAN start (510 kbps) until media has
+flowed for 2 stats ticks and ≥ 2 s have passed, then released to the 32 kbps floor, with
+the start re-asserted only if BWE is below it; released at once on loss > 2 % (§1.1),
+at the latest after 10 s. libwebrtc's initial probe goes out with the first media and,
+audio-only, measures only what is being sent; its result overwrites the estimate. With
+the test ADM media flows within ms, so the timer worked; with the platform ADM capture
+starts ~1 s after the transport, and CI run 42350108767 (PulseAudio null sink) showed BWE
+510 at t = 1 s, then 272 kbps at t = 2 s and a ramp to 431 by 8 s (Opus 386 < 470).
+Holding the minimum makes the probe result irrelevant whenever media starts. Re-issuing
+the start over a higher estimate lowered it (measured dip 510 → 465 kbps), hence the
+"only if below" rule. Local, test ADM, 2 runs × 2 sides: 452.4, 452.4, 510, 510, …;
+release after ~2.87 s at BWE 600 kbps, no re-assert needed.

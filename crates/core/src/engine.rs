@@ -76,11 +76,6 @@ pub(crate) enum Command {
 
 /// Messages the core sends itself (timers, background results).
 pub(crate) enum Internal {
-    /// Re-issue the LAN start rate once an initial probe at the creation start is over.
-    ReassertLanStart {
-        key: PeerKey,
-        generation: u64,
-    },
     SendCandidate {
         key: PeerKey,
         peer: PeerId,
@@ -1061,7 +1056,6 @@ impl Core {
 
     async fn on_internal(&mut self, i: Internal) {
         match i {
-            Internal::ReassertLanStart { key, generation } => self.reassert_lan_start(&key, generation),
             Internal::SendCandidate { key, peer, mid, mline, candidate } => {
                 if self.links.get(&key).is_some_and(|l| l.id == peer) {
                     self.send_peer(
