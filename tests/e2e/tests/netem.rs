@@ -232,25 +232,45 @@ async fn netem_path_switch_v4_to_v6() -> Result<()> {
     call_all(&[&a, &b], CONNECT).await?;
     let t0 = Instant::now();
     let mut s = sample(&a, t0, 12.0).await?;
-    let first = s.iter().find(|p| p["pair_switches"] == 1 && p["path"]["local_family"] == "V4").map(|p| f(p, "t"));
-    if first.is_none() {
+    // With IPv6 degraded from the start the call is on IPv4 after 12 s either way:
+    // libwebrtc may pick IPv4 during the initial grace period (its checks answer first;
+    // no switch needed, pair_switches 0) or start on IPv6 and the CallXL policy moves
+    // it (pair_switches 1). Both are correct; the mirror move IPv4 -> IPv6 is the test.
+    let on_v4 = s.last().cloned().unwrap_or_default();
+    if on_v4["path"]["local_family"] != "V4" {
         decisions(&a, &b).await;
     }
-    ensure!(first.is_some(), "did not move off the degraded IPv6 path");
-    let first = first.unwrap();
+    ensure!(on_v4["path"]["local_family"] == "V4", "still on the degraded IPv6 path: {}", on_v4["path"]);
+    let n0 = on_v4["pair_switches"].as_u64().unwrap_or(0);
+    ensure!(n0 <= 1, "{n0} switches while IPv6 was degraded");
+    let first = s.iter().find(|p| p["pair_switches"] == 1).map(|p| f(p, "t"));
     netem.set(Family::V6, Impairment::CLEAN)?;
     let cleared = (Instant::now() - t0).as_secs_f64();
     s.extend(sample(&a, t0, 45.0).await?);
     h.save_json("alice-samples.json", &json!(s));
-    let second = s.iter().find(|p| p["pair_switches"] == 2).map(|p| f(p, "t"));
-    let early = s.iter().any(|p| f(p, "t") < first + 30.0 && f(p, "pair_switches") > 1.0);
+    let back = s
+        .iter()
+        .find(|p| f(p, "t") > cleared && p["path"]["local_family"] == "V6" && p["pair_switches"] == n0 + 1)
+        .map(|p| f(p, "t"));
     let last = s.last().cloned().unwrap_or_default();
     eprintln!(
-        "first switch at {first:.1} s (to V4), IPv6 cleared at {cleared:.1} s, second switch at {second:?} s, final {}",
-        last["path"]
+        "start: {} switch(es) to reach IPv4 (first at {first:?} s); IPv6 cleared at {cleared:.1} s; back on IPv6 at {back:?} s; final {} switches {}",
+        n0, last["path"], last["pair_switches"]
     );
-    ensure!(!early, "second switch inside the 30 s cooldown");
-    ensure!(second.is_some(), "never returned to IPv6");
+    decisions(&a, &b).await;
+    ensure!(back.is_some(), "never returned to IPv6");
+    let back = back.unwrap();
+    if let Some(first) = first {
+        ensure!(
+            back - first >= 30.0,
+            "returned {:.1} s after the first switch, inside the 30 s cooldown",
+            back - first
+        );
+    } else {
+        // No earlier switch: only the 5 s sustain (+ RTT smoothing) applies.
+        ensure!(back - cleared <= 15.0, "took {:.1} s to return to the clean IPv6 path", back - cleared);
+    }
+    ensure!(last["pair_switches"] == n0 + 1, "flapping: {} switches", last["pair_switches"]);
     ensure!(last["path"]["local_family"] == "V6", "not back on IPv6: {}", last["path"]);
     netem.clear()?;
     finish(&h, a, b, &s, 20.0).await

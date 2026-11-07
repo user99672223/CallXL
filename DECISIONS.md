@@ -268,3 +268,12 @@ Local check (proxy backend, `netem_loss_backoff_recovery`, controlling side): 0/
 clean path, 234–319/1000 under 5 % packet loss, back to 0 within ~4 s after it cleared.
 `CALLXL_ICE_TRACE=1` logs the policy inputs every 2 s (debug only; it allocates on the
 network thread, so it is off by default).
+
+D-0033 (2026-11-07, phase1) — `netem_path_switch_v4_to_v6` accepts both correct starts
+while IPv6 is degraded: libwebrtc may select IPv4 during the initial grace period
+(its checks answer 120 ms sooner; CI run 42346908543: on IPv4 from t = 1 s, 0 switches)
+or start on IPv6 and the CallXL policy moves it (CI run 42345699737: switch at 7 s). The
+asserted behaviour is the mirror move: after IPv6 clears the call returns to IPv6
+exactly once (prefer-IPv6 rule), not inside 30 s of an earlier switch, within 15 s when
+there was none, and does not flap. Choosing IPv4 straight away for a degraded IPv6 path
+is the better outcome for the user (no switch at all).
