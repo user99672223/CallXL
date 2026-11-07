@@ -1,8 +1,7 @@
-# CallXL — handoff (DRAFT)
+# CallXL — handoff (v0.1.0)
 
-> Draft by `p2/infra-qa`. Lines marked **TODO(orchestrator)** are filled in Phase 3 from
-> the final release run. Everything listed under "What CI verified" links to a real run;
-> nothing that needs a real network or a real phone is claimed as tested.
+> Everything listed under "What CI verified" links to a real run; nothing that needs a
+> real network or a real phone is claimed as tested.
 
 ## 1. What this is
 
@@ -30,7 +29,10 @@ normal git client also works and runs the same workflow. Example: prerelease
 [v0.0.1-rc](https://github.com/user99672223/CallXL/releases/tag/v0.0.1-rc), cut by
 dispatch in run [42356469404](https://github.com/user99672223/CallXL/actions/runs/42356469404).
 
-**TODO(orchestrator):** link the v0.1.0 Release here.
+**v0.1.0:** https://github.com/user99672223/CallXL/releases/tag/v0.1.0 — built by
+[release run 42388072624](https://github.com/user99672223/CallXL/actions/runs/42388072624)
+at commit `6724580`, with `CallXL-Setup.exe` (14.95 MB), `callxl_0.1.0_amd64.deb`
+(15.5 MB), `CallXL-unsigned.ipa` (8.3 MB) and `SHA256SUMS.txt`.
 
 ## 2. Install
 
@@ -105,7 +107,7 @@ Numbers are from the linked runs' logs/artifacts.
 | Desktop launches < 1 s (Linux runner) | desktop `--headless-smoke` (`startup_ms` = first frame rendered and core started), three launches under Xvfb after installing the `.deb` | [42364027461](https://github.com/user99672223/CallXL/actions/runs/42364027461), final green [42367829259](https://github.com/user99672223/CallXL/actions/runs/42367829259) (linux build) | `startup_ms` 474 / 141 / 142 ms (`ui_ms` 474 / 136 / 137, `core_ms` 130 / 141 / 142); `callxl_0.1.0_amd64.deb` 15.5 MB installed with `apt`, `callxl --version` ran; every screen rendered by the screenshot test; `gui_join.sh`: the GUI found a `callxl-cli` peer over real mDNS and joined (LAN host/host, connected 2.1 s after launch, run [42361333414](https://github.com/user99672223/CallXL/actions/runs/42361333414)) |
 | Windows build, loopback e2e, installer install/uninstall | `windows` job (`_build-windows.yml`): static CRT build, unit tests, `loopback_v4_lan_policy` with the test ADM, Inno Setup, silent install / `--version` / Start-menu shortcut / silent uninstall | [42367829259](https://github.com/user99672223/CallXL/actions/runs/42367829259) | `CallXL-Setup.exe` 14.95 MB; installed to `%LOCALAPPDATA%\Programs\CallXL`, launched, uninstall removed the folder and the shortcut; release binary 38.8 MB |
 | iOS Simulator tests, xcframework, unsigned IPA | `macos` job (`_build-macos.yml`): xcframework (device arm64 + Simulator arm64), `CallXLTests` 9/9 (core through the Swift bindings: start, session event < 2 s, schema-v1 export, stop; AVAudioSession config; CallKit sequence; Info.plist keys), `CallXLUITests` smoke on the Release build (every screen), `swiftformat --lint`, launch gate | [42376780186](https://github.com/user99672223/CallXL/actions/runs/42376780186) | `CallXL-unsigned.ipa` 8.3 MB with `Payload/CallXL.app/Frameworks/CallXLCore.framework`; xcframework zip 15.3 MB; launch to Home (warm median, `simctl launch`, Release): CallXL 1144 ms vs bare SwiftUI app 600 ms on the same runner, overhead 544 ms ≤ 700 ms budget (D-0107). The absolute number depends on the runner (bare app 410–746 ms across jobs); **real-iPhone launch time is unmeasured** |
-| Release from a clean tag with all three artifacts | `release.yml` | dry-run (no app packages yet): [42356469404](https://github.com/user99672223/CallXL/actions/runs/42356469404) → [v0.0.1-rc](https://github.com/user99672223/CallXL/releases/tag/v0.0.1-rc). **TODO(orchestrator):** v0.1.0 run | all gates green (3 builds, 6 netem legs) in 3 m 57 s |
+| Release from a clean tag with all three artifacts | `release.yml` (workflow_dispatch, tag created by the workflow) | [42388072624](https://github.com/user99672223/CallXL/actions/runs/42388072624) → [v0.1.0](https://github.com/user99672223/CallXL/releases/tag/v0.1.0) | all three platform builds, their tests and the six netem legs green on the first attempt in 21 min; the Release carries the three files and `SHA256SUMS.txt` |
 | Worker deploy workflow | `worker.yml` | deploy: [42355101376](https://github.com/user99672223/CallXL/actions/runs/42355101376); no-secrets path: [42355783034](https://github.com/user99672223/CallXL/actions/runs/42355783034) | deployed `https://callxl.hbadgujar44.workers.dev`, `/health` ok; without secrets: green, manual steps printed |
 
 Not provable in CI (no real network, no real devices): Wi-Fi LAN calls between
@@ -184,6 +186,15 @@ iOS items that the Simulator could not exercise:
     Instruments. CI measured 1144 ms on a shared Simulator runner (544 ms over a bare app);
     the real-device number is unknown.
 
+19. **Desktop first launch after install.** Install the `.deb` (or run the installer),
+    then time the very first launch and a second one. CI measured 474, 141 and 142 ms on
+    one runner but 1343 ms for the first launch after install on another (D-0192); the
+    gate now applies to the launches after the first. *Pass:* the second launch shows the
+    Home screen in under 1 s; tell us the first-launch number.
+20. **Windows LAN bitrate.** In a LAN call from a Windows PC, open Diagnostics after
+    10 s. *Pass:* Opus target ≈ 510 kbps. One CI run on Windows loopback settled at
+    449 kbps with zero loss (bandwidth estimate 600 → 494 kbps), see §7.
+
 Repository cleanup the user should do once in the GitHub UI (this environment's git proxy
 refuses branch deletions): delete the scratch branches `p2/infra-qa-integration-check` and
 `p2/desktop-wintest`; optionally delete the `v0.0.1-rc` prerelease and its tag.
@@ -201,6 +212,16 @@ refuses branch deletions): delete the scratch branches `p2/infra-qa-integration-
   each build has its own random secret, so cloud signaling only works between apps from
   the same build (LAN calls always work). Diagnostics shows `dev_app_secret: true`.
 - **Unsigned Windows installer:** SmartScreen warns on first run.
+- **Two CI gates are sensitive to runner speed** (they passed in the release run, but not
+  every run). Windows `loopback_v4_lan_policy`: on one Windows runner the bandwidth
+  estimate fell from 600 to 494 kbps on loopback at 0 % loss after 5 s, so the Opus
+  target was 449 kbps against the test's 470 kbps floor (run 42385884281); the same code
+  passed 20 minutes earlier (run 42383829083) and in the release run. iOS launch gate:
+  CallXL needed 1012 ms more than a bare SwiftUI app on one Simulator runner (1669 vs
+  657 ms; almost all of it before `main()`, loading the 15.6 MB core library) against a
+  700 ms budget, and 544 ms more on another. Neither changes behaviour you can hear or
+  see; both are v0.2 items (Windows delay-based BWE on bursty send timing; a smaller or
+  statically linked iOS core).
 - AEC3 was only exercised with the test audio device (no acoustic path); real echo
   cancellation quality is part of §6 test 1.
 

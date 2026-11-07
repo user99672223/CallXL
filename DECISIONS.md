@@ -844,3 +844,13 @@ The gate now requires every later launch to be under 1 s and reports launch 1 wi
 The cause of the 1343 ms first frame was not isolated; HANDOFF.md §6 asks the user to time
 the first launch after install on a real machine. The orchestrator made this four-line CI
 change directly (not through a subagent) after the user asked to cut usage.
+
+D-0193 (2026-11-07, orchestrator) — v0.1.0 cut by `release.yml` workflow_dispatch at
+`6724580` (run 42388072624, green on the first attempt, 21 min); Release
+https://github.com/user99672223/CallXL/releases/tag/v0.1.0 carries `CallXL-Setup.exe`,
+`callxl_0.1.0_amd64.deb`, `CallXL-unsigned.ipa`, `SHA256SUMS.txt`. The integration CI run
+just before it (42385884281) failed two runner-sensitive gates on the same commit (Windows
+LAN Opus target 449 < 470 kbps at 0 % loss; iOS launch overhead 1012 > 700 ms); both
+passed in the release run. They are documented with their numbers in HANDOFF.md §7 and
+left as v0.2 work rather than loosened, since neither reflects an audible or visible
+defect and loosening them would hide a real regression later.
