@@ -245,17 +245,34 @@ class CallXlIceController final : public IceControllerInterface {
       recheck_pending_until_ms_ = -1;
     }
     Sample(now);
+    if (trace_) {
+      const bool controlling = !role_ || role_() == webrtc::ICEROLE_CONTROLLING;
+      if (controlling != traced_controlling_) {
+        traced_controlling_ = controlling;
+        RTC_LOG(LS_INFO) << "CallXL ICE role: "
+                         << (controlling ? "controlling" : "controlled")
+                         << " (reason " << static_cast<int>(reason) << ", pending recheck "
+                         << (recheck_pending_until_ms_ >= 0 ? "yes" : "no") << ")";
+      }
+    }
 
     // Controlled side follows the controlling agent's nominations, without
     // flapping back on late packets from the path it just left.
+    // The recheck chain is kept alive here too: the ICE role can change after
+    // setup (glare rollback + role conflict: both agents controlled, then one
+    // controlling again), and libwebrtc requests no sort when it does. A chain
+    // that ended while this side was controlled left the new controlling side
+    // with no evaluation for the rest of the call (CI run 42373009146).
     if (role_ && role_() != webrtc::ICEROLE_CONTROLLING) {
+      SwitchResult r = inner;
       if (reason == IceSwitchReason::DATA_RECEIVED && inner.connection &&
           *inner.connection && *inner.connection == previous_selected_ &&
           selected_ && Usable(selected_) &&
           now - selected_changed_ms_ < kControlledFlapGuardMs) {
-        return SwitchResult{};
+        r = SwitchResult{};
       }
-      return inner;
+      if (!r.recheck_event) r.recheck_event = Recheck(now).recheck_event;
+      return r;
     }
 
     // No usable selection yet, failover, or initial settling: libwebrtc decides.
@@ -376,6 +393,7 @@ class CallXlIceController final : public IceControllerInterface {
   int64_t last_switch_ms_ = -1;
   int64_t recheck_pending_until_ms_ = -1;
   int64_t last_trace_ms_ = -1;
+  bool traced_controlling_ = false;
   const bool trace_;
 };
 

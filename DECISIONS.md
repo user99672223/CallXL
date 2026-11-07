@@ -790,6 +790,37 @@ Reference job (run 42373009146, simctl, Release, warm medians): bare SwiftUI app
 1583 − 746 = 837 ms), so the budget catches a core-load regression but can still trip on an
 unusually slow runner. Launch time on a real iPhone is unmeasured (HANDOFF.md).
 
+D-0160 (2026-11-07, phase1) — Root cause of the intermittent `netem_path_switch_v4_to_v6`
+failure ("never returned to IPv6"; CI run 42373009146 on p2/ios, no controller decision on
+either side, call on IPv4 throughout). With glare at setup (alice rolled back her offer)
+both agents' ICE controllers briefly saw the *controlled* role, and the role was settled
+afterwards by an ICE role conflict (the offerer bob ended up controlled: "nomination on
+the controlled side"). `CallXlIceController::Filter` returned libwebrtc's result on the
+controlled side without scheduling its own recheck, so when a pending recheck fired while
+that side was still controlled the chain ended; when the role then flipped to controlling
+libwebrtc requested no sort (stable call), and the switching policy never ran again for
+the call. Fix: the controlled branch also keeps the recheck chain alive (one allocation-
+free evaluation per 500 ms), so a later role change is always picked up within 500 ms.
+`CALLXL_ICE_TRACE` now also logs every role change the controller observes. Evidence:
+local repro with two IPv4 paths (127.0.0.1 + 127.0.0.2, proxy backend, glare at setup and a
+late controlled → controlling flip in every run): before, 1 of 22 calls with zero policy
+evaluations on both sides (the CI symptom); after, 0 of 24. CI proof: three netem matrix
+runs on `phase1/netem-flakes` (PR description).
+
+D-0161 (2026-11-07, phase1) — Root cause of the intermittent `netem_loss_backoff_recovery`
+failure (CI run 42362442415 on p2/ios: minimum Opus target 420.8 kbps within 10 s of 5 %
+loss; the requirement is a ≥ 30 % drop, ≤ 357 kbps). D-0022's LossBasedBweV2 instant upper
+bound `15 kbps / (loss − 1 %)` caps BWE at ≈ 375 kbps at exactly 5 % loss (≈ 330 kbps Opus),
+i.e. right at the 30 % line, so the outcome followed the ±1 % sampling noise of libwebrtc's
+loss estimate over its observation window (that run: BWE 491 kbps 5 s into the loss ⇒
+estimate ≈ 4.05 %, no meaningful back-off until 13 s). Balance lowered to 10 kbps: 5 % →
+≈ 250 kbps BWE, 4 % → ≈ 333, 8 % → ≈ 143, still inert below ≈ 2.7 % loss, so light loss
+costs no fidelity (§1.1). Local, proxy backend, 5 runs each: before min 361.0 (fail),
+256.8, 249.2, 250.0, 239.1 kbps; after 224.5, 172.2, 127.2, 216.8, 190.6 kbps (all pass),
+recovery to ≥ 450 kbps 1.6–5.6 s after the loss cleared in both sets.
+`netem_frame_adaptation` unchanged (10→20 ms at 10.0 s, 20→10 ms at 47.0 s, 0 gaps).
+Supersedes the balance value in D-0022; no test threshold changed.
+
 D-0190 (2026-11-07, orchestrator) — DECISIONS.md housekeeping after the four merges. The
 two one-line p2/ios entries numbered D-0038 and D-0039 (both "iOS core packaging: …holds
 a") are truncated rebase leftovers of D-0100 and carry no decision of their own; D-0100
