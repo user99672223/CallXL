@@ -56,6 +56,11 @@ generates it once and keeps it in Cloudflare's secret store (rotate by hand with
 - `worker.yml` prints the real one at the end of a deploy ("Signaling URL for
   DEFAULT_SIGNALING_URL / Settings: wss://callxl.<subdomain>.workers.dev/ws") and in the
   job summary.
+- **Deployed:** `worker.yml` run 42355101376 deployed the Worker to
+  `https://callxl.hbadgujar44.workers.dev` (`/health` ok), so the signaling URL is
+  `wss://callxl.hbadgujar44.workers.dev/ws`. **TODO(orchestrator):** set it as
+  `DEFAULT_SIGNALING_URL` before tagging v0.1.0 (or leave the placeholder and have users
+  enter it in Settings).
 - Either put it into `config.rs` and tag a new release (every install then uses it), or
   enter it per device in Settings → Signaling URL (stored locally, overrides the default).
 

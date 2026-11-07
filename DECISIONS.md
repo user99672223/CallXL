@@ -416,3 +416,14 @@ on the new branch (run 42352890429; GitHub caches are per branch with fallback t
 default branch, which had none) 22 m 02 s — clippy 5 m 11 s, build 4 m 17 s, bindgen
 1 m 56 s, e2e 8 m 59 s. sccache in the cold run: Rust 0 % hits, 67 cache write errors and
 a rust-cache save refused by the cache-service rate limit ("You've hit a rate limit").
+
+D-0043 (2026-11-07, p2/infra-qa) — The repository already has `CLOUDFLARE_API_TOKEN`,
+`CLOUDFLARE_ACCOUNT_ID` and `APP_SECRET`, so the M1 `workflow_dispatch` of `worker.yml`
+(run 42355101376) took the deploy path: Worker `callxl` deployed to
+`https://callxl.hbadgujar44.workers.dev` (version 559cf8b3-5154-4d0a-9df5-8ede6075b121),
+`/health` = ok, `APP_SECRET` uploaded, `TOKEN_SIGNING_KEY` generated and stored (none
+existed), no TURN secrets. The no-secrets path is proven with a dispatch input
+`simulate_missing_secrets: true`, which blanks the two secrets in the decision step only
+(same branch of the workflow as a repository without them). `DEFAULT_SIGNALING_URL` is
+left as the placeholder: changing a shipped default belongs to the orchestrator (the
+URL is `wss://callxl.hbadgujar44.workers.dev/ws`).
