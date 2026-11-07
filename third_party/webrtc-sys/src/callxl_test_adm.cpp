@@ -17,6 +17,7 @@
 #endif
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -134,9 +135,16 @@ int64_t NowUs() {
 }
 
 void SleepUntilUs(int64_t deadline_us) {
+#if defined(__APPLE__)
+  // No clock_nanosleep on Apple: sleep for what is left until the same absolute
+  // CLOCK_MONOTONIC deadline, so the 10 ms cadence still does not drift.
+  const int64_t wait = deadline_us - NowUs();
+  if (wait > 0) std::this_thread::sleep_for(std::chrono::microseconds(wait));
+#else
   timespec ts{static_cast<time_t>(deadline_us / 1000000),
               static_cast<long>((deadline_us % 1000000) * 1000)};
   clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr);
+#endif
 }
 #endif
 }  // namespace

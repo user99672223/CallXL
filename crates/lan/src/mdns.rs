@@ -1,15 +1,20 @@
-//! mDNS advertise + browse of `_callxl._tcp.local` (mdns-sd).
+//! mDNS advertise + browse of `_callxl._tcp.local` (mdns-sd; Apple targets use the
+//! system DNS-SD API instead, see `dnssd.rs`).
 //!
 //! TXT records: `k` = Ed25519 key (hex), `x` = X25519 key (hex), `n` = display name,
 //! `v` = protocol version. Sessions are not put in TXT (size-limited); they are
 //! exchanged in the `hello` on the direct TCP connection that discovery triggers.
 
+#[cfg(not(target_vendor = "apple"))]
 use std::collections::HashMap;
 use std::net::IpAddr;
 
+#[cfg(not(target_vendor = "apple"))]
 use mdns_sd::{IfKind, ServiceDaemon, ServiceEvent, ServiceInfo};
+#[cfg(not(target_vendor = "apple"))]
 use tokio::sync::mpsc;
 
+#[cfg(not(target_vendor = "apple"))]
 use crate::LanError;
 
 pub const SERVICE_TYPE: &str = "_callxl._tcp.local.";
@@ -30,15 +35,17 @@ pub enum DiscoveryEvent {
     Lost { key: String },
 }
 
+#[cfg(not(target_vendor = "apple"))]
 pub struct Discovery {
     daemon: ServiceDaemon,
     fullname: String,
 }
 
-fn instance_for(key: &str) -> String {
+pub(crate) fn instance_for(key: &str) -> String {
     format!("callxl-{}", &key[..key.len().min(16)])
 }
 
+#[cfg(not(target_vendor = "apple"))]
 impl Discovery {
     /// Starts advertising `me` and browsing for other CallXL devices.
     /// `loopback` additionally enables 127.0.0.1/::1 (tests and same-host peers).
@@ -97,6 +104,7 @@ impl Discovery {
     }
 }
 
+#[cfg(not(target_vendor = "apple"))]
 impl Drop for Discovery {
     fn drop(&mut self) {
         let _ = self.daemon.unregister(&self.fullname);

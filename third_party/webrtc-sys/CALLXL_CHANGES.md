@@ -45,3 +45,15 @@ and otherwise resets the live APM config (DECISIONS.md D-0024).
 `callxl_test_adm.cpp` builds on Windows (MSVC): the 10 ms tick uses QueryPerformanceCounter
 and a high-resolution waitable timer there, `clock_nanosleep(CLOCK_MONOTONIC)` elsewhere
 (DECISIONS.md D-0061).
+
+## iOS (p2/ios)
+
+`src/callxl_test_adm.cpp`: Apple has no `clock_nanosleep`; on `__APPLE__` `SleepUntilUs`
+sleeps (`std::this_thread::sleep_for`) for the time left until the same absolute
+`CLOCK_MONOTONIC` deadline. Linux and Windows paths are unchanged.
+
+`src/callxl.cpp` (iOS only): the CallXL factory gets video encoder/decoder factories with
+no formats instead of livekit's (which wrap libwebrtc's ObjC default codec factories), so
+the H.264/VP8/VP9/AV1 stacks are dead-stripped from the iOS dylib. CallXL is audio-only.
+`src/peer_connection_factory.cpp`: `video_encoder_backend_codecs` returns an empty list
+when there is no livekit video encoder factory.

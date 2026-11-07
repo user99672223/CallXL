@@ -16,3 +16,9 @@
 /artifacts
 /infra/worker/.npmrc.local
 /.tools
+
+# iOS: generated in CI (packaging/ios/build-xcframework.sh, xcodegen)
+/apps/ios/CallXL/Generated/
+/apps/ios/CallXL.xcodeproj
+/packaging/ios/uniffi-bindgen/target
+/apps/ios/CallXL/Info.plist

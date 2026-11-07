@@ -11,4 +11,8 @@ callxl-signal = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+
+# Apple targets use the system DNS-SD API (dnssd.rs): iOS forbids raw multicast sockets
+# without a restricted entitlement.
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
 mdns-sd = "0.13"

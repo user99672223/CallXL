@@ -12,6 +12,14 @@ use callxl_signal::Identity;
 
 const SERVICE: &str = "com.callxl.app";
 
+/// iOS: one profile per app sandbox, and the container path (a UUID) can change when the
+/// app is updated or re-signed, so the entry name must not depend on it (DECISIONS.md).
+#[cfg(target_os = "ios")]
+fn entry_user(_data_dir: &Path) -> String {
+    "identity".to_string()
+}
+
+#[cfg(not(target_os = "ios"))]
 fn entry_user(data_dir: &Path) -> String {
     let canon = std::fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
     let h = blake3::hash(canon.to_string_lossy().as_bytes());

@@ -281,7 +281,7 @@ RtpCapabilities PeerConnectionFactory::rtp_receiver_capabilities(
 rust::Vec<rust::String> PeerConnectionFactory::video_encoder_backend_codecs(
     VideoEncoderBackend backend) const {
   rust::Vec<rust::String> codecs;
-  if (!peer_factory_) {
+  if (!peer_factory_ || !video_encoder_factory_) {  // CallXL iOS: no video factory
     return codecs;
   }
   for (const auto& codec : video_encoder_factory_->BackendCodecs(backend)) {

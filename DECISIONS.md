@@ -680,3 +680,112 @@ xdg-desktop-portal/PipeWire as Recommends) the second launch measured `startup_m
 first frame"; the tray registration was the only blocking D-Bus call there and no longer
 is. Earlier runs measured a looser "window shown" point (first event-loop turn after
 `show()`): 40 / 166 / 164 ms (run 42357197946), 33 / 145 / 144 ms (run 42361333414).
+
+D-0038 (2026-11-07, p2/ios) — iOS core packaging: `CallXLCore.xcframework` holds a
+
+D-0039 (2026-11-07, p2/ios) — iOS core packaging: `CallXLCore.xcframework` holds a
+
+D-0100 (2026-11-07, p2/ios) — iOS core packaging: `CallXLCore.xcframework` holds a
+*dynamic* `CallXLCore.framework` per slice, linked from `cargo rustc -p callxl-core
+--crate-type cdylib --release` (`-install_name @rpath/CallXLCore.framework/CallXLCore`,
+`-ObjC` so libwebrtc's Objective-C categories used by its iOS ADM/`RTCAudioSession` are
+loaded, `-dead_strip`), not a static library: the prebuilt iOS `libwebrtc.a` is 494 MB per
+slice, which a Rust staticlib would re-archive into every slice and every app link; the
+dylib is resolved and dead-stripped once. Slices: `ios-arm64` (device) and
+`ios-arm64-simulator` only — LiveKit publishes `webrtc-ios-device-arm64-release.zip` and
+`webrtc-ios-simulator-arm64-release.zip` for `webrtc-a545de4` (229 MB each) but
+`webrtc-ios-simulator-x64-release.zip` is a 404, so there is no x86_64 simulator slice and
+no lipo step (Apple-silicon Macs, including `macos-latest`, run the arm64 simulator). The
+iOS prebuilt uses Apple's libc++ (`use_custom_libcxx = false` in its args.gn), so Xcode's
+clang builds webrtc-sys (no clang-21 on macOS). Swift bindings come from a standalone
+host crate `packaging/ios/uniffi-bindgen` (uniffi =0.29.5 `cli`, own lockfile), because
+the in-crate `uniffi-bindgen` bin would need a host (macOS) build of callxl-core and its
+libwebrtc; it reads the metadata from the unstripped device dylib, which is then
+`strip -x`'d. `uniffi.toml` `ffi_module_name` = `CallXLCore` (was `CallXLCoreFFI`) so the
+generated Swift imports the framework module; header/modulemap file names are unchanged.
+Sizes (run 42373009146): CallXLCore.xcframework.zip 15.3 MB; device dylib 15.6 MB;
+CallXL-unsigned.ipa 8.3 MB (app binary 2.0 MB).
+
+D-0101 (2026-11-07, p2/ios) — LAN discovery on Apple targets uses the system DNS-SD API
+(`dns_sd.h`: DNSServiceRegister/Browse/Resolve/GetAddrInfo, `crates/lan/src/dnssd.rs`)
+instead of mdns-sd. Since iOS 14, sending/receiving multicast UDP on an app's own BSD
+sockets requires Apple's restricted `com.apple.developer.networking.multicast`
+entitlement (Apple TN3179), which a sideloaded free-account build cannot carry; Bonjour
+through the system API needs only `NSLocalNetworkUsageDescription` + `NSBonjourServices`.
+Same service type and TXT keys (`k`, `x`, `n`, `v`) and instance name as mdns-sd, so
+desktop and iPhone interoperate. Found addresses are listed IPv4 first (the LAN signaling
+listener binds `0.0.0.0`), link-local IPv6 dropped. One thread owns every DNSServiceRef
+(poll on their sockets), so no locks. Proven in CI on macOS (`two_peers_discover_each_other`);
+on a real iPhone it is a HANDOFF item (the Simulator does not enforce the entitlement).
+
+D-0102 (2026-11-07, p2/ios) — iOS keychain entry for the identity is the fixed name
+`identity` (service `com.callxl.app`), not a hash of the data directory: an iOS app's
+container path contains a UUID that may change on update/re-signing, which would have
+generated a new identity (and a "Key changed" prompt at every peer) after a weekly
+re-sideload. One app sandbox = one profile, so nothing collides.
+
+D-0103 (2026-11-07, p2/ios) — iOS audio session and CallKit: libwebrtc's iOS ADM configures
+the session itself from `RTCAudioSessionConfiguration.webRTCConfiguration` (which lacks
+`.defaultToSpeaker`), and WebRTC's CallKit integration is `RTCAudioSession.useManualAudio`
++ `isAudioEnabled` toggled in `provider(_:didActivate:)`. The prebuilt is built with
+`rtc_enable_objc_symbol_export=false`, so those classes cannot be linked against; the
+app reaches them through the Objective-C runtime (`NSClassFromString`, KVC) — they are
+registered because the framework links libwebrtc with `-ObjC`. At launch the app sets
+WebRTC's configuration to §8's (`.playAndRecord`, `.voiceChat`, `.allowBluetooth`,
+`.allowBluetoothA2DP`, `.defaultToSpeaker`) and enables manual audio; a CallKit
+`CXStartCallAction` configures the session and joins, CallKit activates it, the app then
+enables WebRTC audio. Hold (a phone call) mutes the microphone until resume. If CallKit
+refuses the transaction the app joins anyway and activates the session itself. File
+sending uses the system document picker (Files, iCloud, other providers) with a recipient
+picker, not a Share Extension (a second process with its own IPC to the running core);
+picked files stay security-scoped until the transfer ends, so nothing is copied.
+
+D-0104 (2026-11-07, p2/ios) — CallXLCore.framework link-time trimming, each change with its
+measured effect: (1) `-Wl,-dead_strip_dylibs`: dependent libraries 23 → 18 (OpenGLES, GLKit,
+CoreAudio, libiconv, … were linked by webrtc-sys's iOS list but unused). (2) No `-ObjC`:
+it force-loaded all 147 Objective-C classes of libwebrtc (every video codec, Metal renderer,
+camera capture). Only the 7 category objects whose classes are linked are linked
+explicitly (`OBJC_CATEGORY_OBJECTS` in build-xcframework.sh); a missing one is caught by
+BindingsTests (run 42366443719 crashed in start() with `-[RTCVideoCodecInfo
+initWithNativeSdpVideoFormat:]: unrecognized selector` until the video-codec categories
+were added). (3) iOS-only empty video codec factories in the CallXL factory (audio-only
+app, §15): dependent libraries 18 → 13 (Metal, MetalKit, QuartzCore, CoreGraphics, Network
+gone), device dylib 16 154 504 → 15 570 568 bytes. Launch effect, measured in one job
+(run 42373009146, simctl, Release, warm medians): bare SwiftUI app 410 ms; + CallXLCore
+linked but never called 729 ms; + Charts/CallKit/AVKit 620 ms; CallXL 951 ms (gate
+< 1000 ms passed). Across runs the same bare app measured 410–746 ms and CallXL
+951–1583 ms, so the gate is sensitive to the runner's speed; on a real iPhone it is a
+HANDOFF item. Remaining premain cost is dyld loading the 15.6 MB dylib itself.
+
+D-0105 (2026-11-07, p2/ios) — The iOS app creates and starts the Rust core off the main
+actor (`AppModel.start()`: `CallXl(config:)` opens SQLite and the keychain, `start()`
+spins up the media engine); Home renders from a placeholder snapshot and "New session"
+is enabled once the core runs. Measured under XCUITest (Debug), launch to Home went from
+4306 ms (core built in `App.init`, run 42357184261) to 2662 ms (run 42358988220); the
+core's own creation + start then took 0.2 ms + 169 ms on a background task.
+
+D-0106 (2026-11-07, p2/ios) — How §1.5 "launch to Home under 1 s on the Simulator" is
+measured: `packaging/ios/measure-launch.sh` installs the Release build and launches it
+with `xcrun simctl launch` (1 cold + 5 warm launches, real core); the app writes
+`<ms to Home> premain=… app.init=… home.appear=…` (process start = kernel start time;
+`premain` = a C constructor in the app, i.e. every dylib loaded and initialised) to
+Documents. The gate is the warm median. Not XCUITest: its launch procedure added about
+1.5 s before any app code ran, in Debug and Release alike (runs 42358988220, 42360979987:
+process start → App.init 1550–1912 ms), so the UI test only reports. A bare SwiftUI app
+(`LaunchBaseline` target, same clock) is measured in the same job as the Simulator's
+floor: 606–625 ms to its first screen (premain ~320 ms) on the macos-latest runner.
+Unit tests run the Debug build (`CallXL` scheme, @testable), UI smoke the Release build
+(`CallXLUI` scheme).
+
+D-0107 (2026-11-07, p2/ios) — The §1.5 iOS launch gate is relative (supersedes the absolute
+1000 ms check of D-0106; orchestrator review of PR #4): in one job, on one Simulator,
+CallXL's warm median launch to Home minus the bare `LaunchBaseline` app's warm median must
+be ≤ 700 ms (`packaging/ios/launch-gate.py`). An absolute CallXL median above 1000 ms only
+prints a `::warning::`; both medians and every launch go to the `ios-metrics` artifact
+(JSON). Reason: the shared macos-latest runner's speed varies about 2x between jobs (bare
+app 410–746 ms, CallXL 951–1583 ms across runs), so an absolute limit measures the runner.
+Reference job (run 42373009146, simctl, Release, warm medians): bare SwiftUI app 410 ms;
++ CallXLCore.framework linked, never called 729 ms; + Charts/CallKit/AVKit 620 ms; CallXL
+951 ms (overhead 541 ms). The overhead also grows on slow runners (run 42370298128:
+1583 − 746 = 837 ms), so the budget catches a core-load regression but can still trip on an
+unusually slow runner. Launch time on a real iPhone is unmeasured (HANDOFF.md).
