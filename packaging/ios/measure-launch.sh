@@ -3,14 +3,13 @@
 # CallXL.app, launches it with `simctl launch` (1 cold + 5 warm launches, real core) and
 # reads the launch phases the app writes to Documents/launch.txt when started with
 # -uiTestReportLaunch ("<ms to Home> app.init=<ms> home.appear=<ms>", from process start).
-# Fails when the median warm launch to Home is 1000 ms or more.
-# With a third argument (`--report-only`) it only prints (used for LaunchBaseline, the
-# Simulator's floor for a bare SwiftUI app).
-# Usage: packaging/ios/measure-launch.sh <simulator-udid> <path/to/X.app> [--report-only]
+# Report only: prints the medians and writes them to <out.json>; the gate (CallXL minus
+# the LaunchBaseline floor, measured in the same job) is packaging/ios/launch-gate.py.
+# Usage: packaging/ios/measure-launch.sh <simulator-udid> <path/to/X.app> <out.json>
 set -euo pipefail
 UDID="$1"
 APP="$2"
-REPORT_ONLY="${3:-}"
+OUT_JSON="$3"
 BUNDLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
 
 xcrun simctl install "$UDID" "$APP"
@@ -31,13 +30,12 @@ for i in 0 1 2 3 4 5; do
 done
 xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
 
-python3 - "$BUNDLE" "$REPORT_ONLY" "${results[@]}" <<'PY'
-import statistics, sys
-bundle, report_only = sys.argv[1], sys.argv[2] == "--report-only"
+python3 - "$BUNDLE" "$OUT_JSON" "${results[@]}" <<'PY'
+import json, statistics, sys
+bundle, out = sys.argv[1], sys.argv[2]
 v = [float(x) for x in sys.argv[3:]]
 warm = v[1:]
 med = statistics.median(warm)
 print(f"launch-to-first-screen-ms {bundle} (simctl, Release): cold={v[0]:.0f} warm median={med:.0f} warm={[round(x) for x in warm]}")
-if not report_only and med >= 1000:
-    sys.exit(f"launch to Home {med:.0f} ms >= 1000 ms")
+json.dump({"bundle": bundle, "cold_ms": v[0], "warm_ms": warm, "warm_median_ms": med}, open(out, "w"), indent=2)
 PY

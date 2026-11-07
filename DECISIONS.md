@@ -776,3 +776,16 @@ process start → App.init 1550–1912 ms), so the UI test only reports. A bare 
 floor: 606–625 ms to its first screen (premain ~320 ms) on the macos-latest runner.
 Unit tests run the Debug build (`CallXL` scheme, @testable), UI smoke the Release build
 (`CallXLUI` scheme).
+
+D-0107 (2026-11-07, p2/ios) — The §1.5 iOS launch gate is relative (supersedes the absolute
+1000 ms check of D-0106; orchestrator review of PR #4): in one job, on one Simulator,
+CallXL's warm median launch to Home minus the bare `LaunchBaseline` app's warm median must
+be ≤ 700 ms (`packaging/ios/launch-gate.py`). An absolute CallXL median above 1000 ms only
+prints a `::warning::`; both medians and every launch go to the `ios-metrics` artifact
+(JSON). Reason: the shared macos-latest runner's speed varies about 2x between jobs (bare
+app 410–746 ms, CallXL 951–1583 ms across runs), so an absolute limit measures the runner.
+Reference job (run 42373009146, simctl, Release, warm medians): bare SwiftUI app 410 ms;
++ CallXLCore.framework linked, never called 729 ms; + Charts/CallKit/AVKit 620 ms; CallXL
+951 ms (overhead 541 ms). The overhead also grows on slow runners (run 42370298128:
+1583 − 746 = 837 ms), so the budget catches a core-load regression but can still trip on an
+unusually slow runner. Launch time on a real iPhone is unmeasured (HANDOFF.md).

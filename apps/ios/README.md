@@ -57,5 +57,9 @@ Design tokens come from `design/tokens.json`; after changing it run
 `packaging/ios/gen-tokens.py` (CI checks that `Theme/Tokens.swift` is current).
 `swiftformat --lint apps/ios` must be clean.
 
+Launch time: on the CI Simulator, loading CallXLCore.framework costs about 320 ms before
+`main` (bare app 410 ms vs. 729 ms with the framework linked, DECISIONS.md D-0104/D-0107);
+static linking or fewer static initialisers are v0.2 optimisation candidates, untested.
+
 Test-only launch arguments: `-uiTestFakeCore` (in-app fake core, no CallKit) and
 `-uiTestReportLaunch` (shows the launch-to-Home time for the UI test).

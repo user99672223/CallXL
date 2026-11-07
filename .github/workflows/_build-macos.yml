@@ -5,7 +5,7 @@
 #            `CallXLCore.xcframework` (zip), after the Bonjour backend tests,
 #            `xcodebuild test` on an iOS Simulator and `swiftformat --lint`.
 #            Scripts: packaging/ios/build-xcframework.sh, packaging/ios/build-unsigned-ipa.sh,
-#            packaging/ios/measure-launch.sh (launch to Home < 1 s, §1.5).
+#            packaging/ios/measure-launch.sh + launch-gate.py (§1.5, D-0107; artifact ios-metrics).
 # The steps follow the iOS app's own macOS job; until apps/ios and those scripts exist the
 # job only reports that and outputs no artifact.
 name: _build-macos
@@ -179,18 +179,28 @@ jobs:
           path: target/ios/CallXL-unsigned.ipa
           if-no-files-found: error
 
-      - name: Launch to Home < 1 s (Release build, simctl launch, real core)
+      - name: Launch time (Release, simctl launch, real core) vs bare SwiftUI baseline
+        id: launch
         if: steps.present.outputs.ok == 'true'
         timeout-minutes: 10
         run: |
           set -euo pipefail
           P=target/ios/DerivedData-test/Build/Products/Release-iphonesimulator
-          # The Simulator's floor first (bare SwiftUI app, same clock), then CallXL.
-          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/LaunchBaseline.app" --report-only
-          # Attribution: + CallXLCore.framework linked (not called); + Charts/CallKit/AVKit.
-          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/LaunchBaselineCore.app" --report-only
-          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/LaunchBaselineFrameworks.app" --report-only
-          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/CallXL.app"
+          M=target/ios/metrics
+          mkdir -p "$M"
+          # Same job, same Simulator: the floor first, the attribution variants, then CallXL.
+          for app in LaunchBaseline LaunchBaselineCore LaunchBaselineFrameworks CallXL; do
+            packaging/ios/measure-launch.sh "$SIM_UDID" "$P/$app.app" "$M/launch-$app.json"
+          done
+          # Gate: CallXL minus LaunchBaseline <= 700 ms; > 1000 ms absolute is a warning.
+          python3 packaging/ios/launch-gate.py "$M" target/ios/ios-metrics.json
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.present.outputs.ok == 'true'
+        with:
+          name: ios-metrics
+          path: target/ios/ios-metrics.json
+          if-no-files-found: warn
 
       - name: swiftformat --lint (pinned 0.64.6)
         if: always() && steps.present.outputs.ok == 'true'
