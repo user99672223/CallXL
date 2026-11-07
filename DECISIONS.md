@@ -41,3 +41,33 @@ D-0006 (2026-11-07, orchestrator) — Phase 2 agents run concurrently on one 4-c
 machine. To avoid three independent libwebrtc links, all worktrees share
 `CARGO_TARGET_DIR=/home/user/target-shared`; cargo's own lock serialises concurrent
 builds. CI keeps the default per-checkout target directory.
+
+D-0007 (2026-11-07, phase1) — Commit trailers use the attribution lines supplied by the
+hosting environment (`Co-Authored-By: Claude Opus 5.5 …` + `Claude-Session: …`) instead
+of the `Claude Fable 5.1` line in the phase-1 brief. The environment's attribution rule
+takes precedence over an agent-written prompt; the session line is identical in both.
+
+D-0008 (2026-11-07, phase1) — The prebuilt libwebrtc `webrtc-a545de4` is compiled against
+Chromium's hermetic libc++ whose headers require clang >= 21.1 (`_LIBCPP_CLANG_VER < 2101`
+in `__configuration/compiler.h`). Ubuntu 24.04 ships clang 18 and the `ubuntu-22.04`
+runner clang 14/15, so both install `clang-21` from apt.llvm.org and build with
+`CC=clang-21 CXX=clang++-21` (set by `scripts/dev-env.sh` and in CI).
+
+D-0009 (2026-11-07, phase1) — `crates/media` binds directly to the forked `webrtc-sys`
+(cxx bridges) and does not use the crates.io `libwebrtc` 0.4.0 crate. That crate keeps
+every sys handle `pub(crate)`, so each new knob (factory options, ICE controller, ADM,
+APM readback, jitter-buffer delay) would have required forking it as well. Writing our
+own ~1 kLOC safe wrapper keeps exactly one fork (`third_party/webrtc-sys`) and lets the
+observer callbacks follow §10 (one `try_send` each) by construction.
+
+D-0010 (2026-11-07, phase1) — The prebuilt libwebrtc is consumed through
+`LK_CUSTOM_WEBRTC` pointing at `$HOME/.cache/callxl/webrtc-a545de4/<triple>`, populated by
+`scripts/ci-webrtc-cache.sh` (CI caches that directory keyed on the tag). webrtc-sys-build
+therefore never downloads into the target dir; the M0 header check is
+`ls $LK_CUSTOM_WEBRTC/include/api/peer_connection_interface.h`.
+
+D-0011 (2026-11-07, phase1) — The development machine's kernel has no IPv6 at all
+(`AF_INET6` socket creation fails with EAFNOSUPPORT, no `/proc/sys/net/ipv6`). IPv6 e2e
+tests (`loopback_v6_lan_policy`, both path-switch tests) detect this and print `SKIP` when
+`CI` is unset; when `CI` is set (GitHub runners have `::1`) they must run and an
+unavailable `::1` is a failure. They are therefore verified only in CI.

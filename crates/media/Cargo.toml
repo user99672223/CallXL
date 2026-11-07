@@ -1,0 +1,11 @@
+[package]
+name = "callxl-media"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "CallXL media plane: thin, safe wrapper over libwebrtc (via the forked webrtc-sys)"
+
+[dependencies]
+webrtc-sys = { workspace = true }
+cxx = { workspace = true }
