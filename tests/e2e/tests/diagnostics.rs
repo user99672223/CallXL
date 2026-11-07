@@ -94,7 +94,7 @@ async fn diagnostics_complete() -> Result<()> {
     for m in &want {
         let s = series.iter().find(|s| s["metric"] == m.as_str());
         let n = s.and_then(|s| s["values"].as_array()).map_or(0, Vec::len);
-        ensure!(n >= 5 && n <= 60, "sparkline {m}: {n} samples");
+        ensure!((5..=60).contains(&n), "sparkline {m}: {n} samples");
     }
     eprintln!("{} sparklines, all §7 ones with 5..=60 samples", series.len());
 
