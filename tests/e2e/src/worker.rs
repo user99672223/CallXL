@@ -9,6 +9,8 @@ use tokio::process::{Child, Command};
 
 pub struct LocalWorker {
     child: Child,
+    /// Process group of wrangler and its workerd children.
+    pgid: Option<u32>,
     pub port: u16,
 }
 
@@ -43,6 +45,8 @@ impl LocalWorker {
             .stdout(Stdio::from(log.try_clone()?))
             .stderr(Stdio::from(log))
             .kill_on_drop(true)
+            // Own process group: wrangler's workerd children are killed with it on drop.
+            .process_group(0)
             .spawn()
             .context("spawn wrangler")?;
         let deadline = Instant::now() + Duration::from_secs(90);
@@ -53,10 +57,13 @@ impl LocalWorker {
                 let mut buf = Vec::new();
                 let _ = tokio::time::timeout(Duration::from_secs(5), s.read_to_end(&mut buf)).await;
                 if String::from_utf8_lossy(&buf).contains("200") {
-                    return Ok(Self { child, port });
+                    let pgid = child.id();
+                    return Ok(Self { child, pgid, port });
                 }
             }
             if Instant::now() > deadline {
+                let pgid = child.id();
+                drop(Self { child, pgid, port });
                 bail!("wrangler dev did not come up on port {port}");
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -70,6 +77,9 @@ impl LocalWorker {
 
 impl Drop for LocalWorker {
     fn drop(&mut self) {
+        if let Some(pgid) = self.pgid {
+            let _ = std::process::Command::new("kill").args(["-s", "TERM", "--", &format!("-{pgid}")]).status();
+        }
         let _ = self.child.start_kill();
     }
 }
