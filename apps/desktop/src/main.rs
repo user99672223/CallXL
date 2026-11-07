@@ -53,6 +53,36 @@ fn show(w: &AppWindow) {
     });
 }
 
+/// Tray menu → the same UI commands the window uses; its state follows the call.
+fn wire_tray(t: &Tray, win: &slint::Weak<AppWindow>) {
+    if let Some(w) = win.upgrade() {
+        let app = w.global::<App>();
+        t.set_in_call(app.get_in_call());
+        t.set_muted(app.get_muted());
+    }
+    let weak = win.clone();
+    t.on_show(move || {
+        if let Some(w) = weak.upgrade() {
+            show(&w);
+        }
+    });
+    let weak = win.clone();
+    t.on_toggle_mute(move || {
+        if let Some(w) = weak.upgrade() {
+            w.global::<App>().invoke_toggle_mute();
+        }
+    });
+    let weak = win.clone();
+    t.on_leave(move || {
+        if let Some(w) = weak.upgrade() {
+            w.global::<App>().invoke_leave();
+        }
+    });
+    t.on_quit(move || {
+        let _ = slint::quit_event_loop();
+    });
+}
+
 thread_local! {
     /// Set once the window exists; run on the UI thread when a second launch asks.
     static SHOW: RefCell<Option<slint::Weak<AppWindow>>> = const { RefCell::new(None) };
@@ -128,16 +158,20 @@ fn main() {
     bridge::init_models(&win);
     win.global::<Colors>().set_dark(prefs.dark);
     SHOW.with(|s| *s.borrow_mut() = Some(win.as_weak()));
-    let tray = Tray::new().ok();
 
-    // --headless-smoke: done when the window is live and the core has started.
-    let progress = Rc::new(RefCell::new([false, false]));
+    // --headless-smoke: done when the first frame is on screen and the core has started; the two
+    // parts are reported separately (ui_ms, core_ms) so a slow side is obvious.
+    let progress: Rc<RefCell<[Option<u128>; 2]>> = Rc::default();
+    let reported = Rc::new(std::cell::Cell::new(false));
     let mark = {
         let progress = progress.clone();
         Rc::new(move |which: usize| {
             let mut p = progress.borrow_mut();
-            p[which] = true;
-            if p[0] && p[1] {
+            p[which].get_or_insert(t0.elapsed().as_millis());
+            if let [Some(ui), Some(core)] = *p
+                && !reported.replace(true)
+            {
+                println!("ui_ms={ui} core_ms={core}");
                 println!("startup_ms={}", t0.elapsed().as_millis());
                 println!("ready");
                 let _ = slint::quit_event_loop();
@@ -152,7 +186,7 @@ fn main() {
         signaling_url: None,
         headless: false,
     };
-    let ui = UiHandle { win: win.as_weak(), tray: tray.as_ref().map(|t| t.as_weak()) };
+    let ui = UiHandle { win: win.as_weak() };
     let opts = BridgeOptions {
         data_dir: data_dir.clone(),
         prefs: prefs.clone(),
@@ -178,40 +212,16 @@ fn main() {
         win.on_core_started(move || mark(1));
     }
 
-    if let Some(t) = &tray {
-        let weak = win.as_weak();
-        t.on_show(move || {
-            if let Some(w) = weak.upgrade() {
-                show(&w);
-            }
-        });
-        let weak = win.as_weak();
-        t.on_toggle_mute(move || {
-            if let Some(w) = weak.upgrade() {
-                w.global::<App>().invoke_toggle_mute();
-            }
-        });
-        let weak = win.as_weak();
-        t.on_leave(move || {
-            if let Some(w) = weak.upgrade() {
-                w.global::<App>().invoke_leave();
-            }
-        });
-        t.on_quit(move || {
-            let _ = slint::quit_event_loop();
-        });
-    }
-
     // Closing the window: during a call (with a tray) the call keeps running in the
     // tray; otherwise CallXL quits.
     {
-        let has_tray = tray.is_some();
         let weak = win.as_weak();
         let b = bridge.clone();
         let told = std::cell::Cell::new(false);
         let notifier = platform::Notifier::spawn();
         win.window().on_close_requested(move || {
             let in_call = weak.upgrade().is_some_and(|w| w.global::<App>().get_in_call());
+            let has_tray = bridge::TRAY.with(|t| t.borrow().is_some());
             if in_call && has_tray {
                 b.send(UiCmd::Focused(false));
                 if !told.replace(true) {
@@ -257,10 +267,31 @@ fn main() {
     }
 
     win.show().expect("could not show the main window");
+    {
+        // The tray is created on the first event-loop turn after show(), never before the
+        // first frame (a missing StatusNotifier host can take a D-Bus round trip or more).
+        let weak = win.as_weak();
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            let t1 = Instant::now();
+            let Ok(t) = Tray::new() else { return };
+            wire_tray(&t, &weak);
+            tracing::debug!("tray created in {} ms", t1.elapsed().as_millis());
+            bridge::TRAY.with(|slot| *slot.borrow_mut() = Some(t));
+        });
+    }
     if smoke {
-        // First event-loop turn after show(): the window exists and the UI is live.
-        let mark = mark.clone();
-        slint::Timer::single_shot(Duration::ZERO, move || mark(0));
+        // UI side: the first frame has been rendered (falls back to the first event-loop
+        // turn after show() for a renderer without rendering notifications).
+        let m0 = mark.clone();
+        let notified = win.window().set_rendering_notifier(move |state, _| {
+            if matches!(state, slint::RenderingState::AfterRendering) {
+                m0(0);
+            }
+        });
+        if notified.is_err() {
+            let mark = mark.clone();
+            slint::Timer::single_shot(Duration::ZERO, move || mark(0));
+        }
         // A broken environment fails the check instead of hanging CI.
         slint::Timer::single_shot(Duration::from_secs(20), || {
             eprintln!("callxl: headless smoke timed out");
@@ -271,7 +302,7 @@ fn main() {
     let _ = win.hide();
     bridge.send(UiCmd::Quit);
     bridge.join(Duration::from_secs(8));
-    drop(tray);
+    bridge::TRAY.with(|t| t.borrow_mut().take());
     if smoke {
         let _ = std::fs::remove_dir_all(&data_dir);
     }

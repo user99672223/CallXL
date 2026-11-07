@@ -720,11 +720,16 @@ pub fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
+thread_local! {
+    /// The tray icon (UI thread only). Created after the window's first frame so that
+    /// registering with the desktop's tray host never delays startup.
+    pub static TRAY: std::cell::RefCell<Option<Tray>> = const { std::cell::RefCell::new(None) };
+}
+
 /// Handles for posting patches to the UI thread.
 #[derive(Clone)]
 pub struct UiHandle {
     pub win: slint::Weak<AppWindow>,
-    pub tray: Option<slint::Weak<Tray>>,
 }
 
 impl UiHandle {
@@ -733,13 +738,14 @@ impl UiHandle {
             return;
         }
         let win = self.win.clone();
-        let tray = self.tray.clone();
         let _ = slint::invoke_from_event_loop(move || {
             let Some(w) = win.upgrade() else { return };
-            let t = tray.as_ref().and_then(|t| t.upgrade());
-            for p in patches {
-                p(&w, t.as_ref());
-            }
+            TRAY.with(|t| {
+                let t = t.borrow();
+                for p in patches {
+                    p(&w, t.as_ref());
+                }
+            });
         });
     }
 }
