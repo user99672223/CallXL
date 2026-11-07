@@ -278,3 +278,13 @@ exactly once (prefer-IPv6 rule), not inside 30 s of an earlier switch, within 25
 there was none (libwebrtc's RTT smoothing needs ~11 one-per-second backup samples to bring
 120 ms under the 5 ms IPv6 bonus, then the 5 s sustain; CI trace in run 42346908543), and does not flap. Choosing IPv4 straight away for a degraded IPv6 path
 is the better outcome for the user (no switch at all).
+
+D-0034 (2026-11-07, phase1) — IPv6 preference at call setup: during the controller's
+1.5 s grace period, a usable IPv6 pair whose RTT is within the 5 ms IPv6 bonus of
+libwebrtc's IPv4 pick replaces it. libwebrtc selects whichever pair becomes writable
+first, so with both families clean the call sometimes started on IPv4 (CI run
+42347801925 `netem_path_switch_v6_to_v4`: "call did not start on IPv6", IPv4 host pair,
+0 switches) and only the post-grace prefer-IPv6 rule (5 s sustain, a counted switch)
+would have moved it. Same run: `netem_path_switch_v4_to_v6` passed — IPv6→IPv4 at 8.0 s,
+back to IPv6 at 38.0 s (≥ 30 s cooldown), decisions exactly ["v6->v4: rtt 120->0 ms",
+"v4->v6: prefer-ipv6"].

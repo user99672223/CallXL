@@ -11,8 +11,9 @@
  *   - continuously for sustain_ms,
  *   - and at least cooldown_ms after the previous switch.
  * Failover (selected pair destroyed / not writable / not receiving) is never
- * delayed. The controlled agent follows nominations, except that for
- * kControlledFlapGuardMs after a change it ignores DATA_RECEIVED switches back
+ * delayed. During the initial grace period a usable IPv6 pair that is not worse
+ * replaces an IPv4 pick (IPv6 preference at setup). The controlled agent
+ * follows nominations, except that for kControlledFlapGuardMs after a change it ignores DATA_RECEIVED switches back
  * to the pair it just left: packets still in flight on the old (slower) path
  * otherwise flip the selection on every packet (CI: 9 flips in 60 ms after one
  * controlling-side switch away from a 60 ms-delayed IPv6 path).
@@ -222,6 +223,25 @@ class CallXlIceController final : public IceControllerInterface {
           selected_ && !in_grace) {
         last_switch_ms_ = now;
         Report("failover");
+      }
+      // IPv6 preference at setup (section 4): libwebrtc selects whichever pair
+      // became writable first; while settling, take a usable IPv6 pair that is
+      // not worse than the IPv4 pick (RTT within v6_bonus_ms). Inside the grace
+      // period this is the initial choice, not a counted switch.
+      if (in_grace) {
+        const Connection* pick =
+            inner.connection && *inner.connection ? *inner.connection : selected_;
+        if (pick && !IsV6(pick) && Usable(pick)) {
+          const Connection* v6 = nullptr;
+          for (const Connection* c : inner_.GetConnections()) {
+            if (!IsV6(c) || !Usable(c) ||
+                c->local_candidate().component() != pick->local_candidate().component() ||
+                c->Rtt().ms() > pick->Rtt().ms() + policy_.v6_bonus_ms)
+              continue;
+            if (!v6 || c->Rtt() < v6->Rtt()) v6 = c;
+          }
+          if (v6 && v6 != selected_) inner.connection = v6;
+        }
       }
       // Keep a recheck chain alive: in a stable call libwebrtc requests no sorts at
       // all, so without it the policy below would never be evaluated (observed: no
