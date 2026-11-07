@@ -249,3 +249,79 @@ async fn signaling_glare() -> Result<()> {
     assert_continuous_tail(&rb, 6.0)?;
     Ok(())
 }
+
+/// Cloud signaling through the Worker run locally (`wrangler dev --local`): LAN off on
+/// both peers, the session list arrives from the Lobby DO, offers/answers/candidates are
+/// relayed by the Session DO, media still flows peer-to-peer on loopback; the session is
+/// deleted when its last member leaves.
+#[tokio::test(flavor = "multi_thread")]
+async fn signaling_roundtrip_wrangler() -> Result<()> {
+    let h = Harness::new("signaling_roundtrip_wrangler")?;
+    // The CLI's build-time APP_SECRET (a random dev value unless CALLXL_APP_SECRET was set).
+    let probe = Peer::spawn(&h, PeerOpts::new("probe").bind("127.0.0.1")).await?;
+    let secret = probe.call("debug", json!({"name": "app_secret"})).await?.as_str().unwrap_or_default().to_string();
+    probe.kill().await;
+    let port = std::net::TcpListener::bind("127.0.0.1:8787").map(|_| 8787).unwrap_or(0);
+    let port = if port == 0 { std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port() } else { port };
+    let t = Instant::now();
+    let worker = callxl_e2e::worker::LocalWorker::start(port, &secret, h.dir.join("wrangler.log")).await?;
+    eprintln!("wrangler dev up on {} after {:.1} s", worker.url(), t.elapsed().as_secs_f64());
+    let cloud = |n: &str, w: usize| PeerOpts {
+        cloud_url: Some(worker.url()),
+        lan_off: true,
+        ..PeerOpts::new(n).bind("127.0.0.1").wav(w)
+    };
+    let a = Peer::spawn(&h, cloud("alice", 0)).await?;
+    let b = Peer::spawn(&h, cloud("bob", 1)).await?;
+    for p in [&a, &b] {
+        let deadline = Instant::now() + CONNECT;
+        while p.snapshot().await?["cloud_connected"] != true {
+            ensure!(Instant::now() < deadline, "{} never connected to the lobby", p.name);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+    aec_off(&a).await?;
+    aec_off(&b).await?;
+    let t0 = Instant::now();
+    let sid = call_all(&[&a, &b], CONNECT).await?;
+    eprintln!("call over cloud signaling connected {:.2} s after create", t0.elapsed().as_secs_f64());
+    let seen = b.snapshot().await?["sessions"]
+        .as_array()
+        .and_then(|v| v.iter().find(|x| x["id"] == sid.as_str()).cloned())
+        .unwrap_or_default();
+    eprintln!("bob's view of the session: {seen}");
+    ensure!(seen["cloud"] == true && seen["lan"] == false, "session not seen via the cloud only: {seen}");
+    let pa = a.wait_stats(Duration::from_secs(10), |p| p["recv_kbps"].as_f64().unwrap_or(0.0) > 100.0).await?;
+    let d = a.diagnostics().await?;
+    eprintln!(
+        "alice: transport={} signaling_latency={} ms path={} recv={} kbps",
+        d["global"]["signaling_transport"], d["global"]["signaling_latency_ms"], pa["path"], pa["recv_kbps"]
+    );
+    h.save_json("alice-diagnostics.json", &d);
+    ensure!(d["global"]["signaling_transport"] == "Cloud", "signaling not over the cloud");
+    ensure!(pa["path"]["kind"] == "Lan", "media should stay peer-to-peer on loopback: {}", pa["path"]);
+    ensure!(a.snapshot().await?["peers"][0]["lan"] == false, "peer marked as LAN-signaled with LAN off");
+
+    tokio::time::sleep(Duration::from_secs(4)).await;
+
+    // Session lifecycle: bob leaves (alice stays), then alice leaves → session deleted.
+    b.call("leave_session", Value::Null).await?;
+    a.wait_event("PeerLeft", CONNECT, |v| v["peer_key"] == b.key.as_str()).await?;
+    a.call("leave_session", Value::Null).await?;
+    let deadline = Instant::now() + CONNECT;
+    loop {
+        let s = b.snapshot().await?["sessions"].clone();
+        if !s.as_array().is_some_and(|v| v.iter().any(|x| x["id"] == sid.as_str())) {
+            eprintln!("session {sid} gone from the lobby after its last member left: {s}");
+            break;
+        }
+        ensure!(Instant::now() < deadline, "session still listed after everyone left: {s}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let ra = a.stop().await?;
+    let rb = b.stop().await?;
+    drop(worker);
+    assert_continuous(&ra)?;
+    assert_continuous(&rb)?;
+    Ok(())
+}

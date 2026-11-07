@@ -210,3 +210,11 @@ part of the allowance expired unused. Measured on `file_transfer_throttle_keeps_
 0.00 % both times, audio send avg 279.7 → 282.0 kbps. The rest of the gap to the link rate
 is the throttle's RTT rule (halve when RTT > 1.5× its 10 s baseline), i.e. audio first by
 design. The burst cap stays at 100 ms (no larger bursts into a shallow bottleneck queue).
+
+D-0028 (2026-11-07, phase1) — The Worker's entry module (`src/index.ts`) exports only the
+fetch handler and the two Durable Object classes; tokens/TURN/envelope helpers moved to
+`src/lib.ts`. Current workerd refuses to start an entry module with non-handler exports
+("Incorrect type for map entry 'TOKEN_TTL_S'"), which `wrangler dev --local` hit while
+vitest (which imports the module directly) did not. The e2e harness gets the CLI's
+build-time APP_SECRET through `debug app_secret` (the value is in the binary anyway) and
+starts the local Worker with it, so the test works with a random dev secret too.

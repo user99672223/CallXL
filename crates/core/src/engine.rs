@@ -398,6 +398,9 @@ impl Core {
                     .collect();
                 Ok(Value::Array(v))
             }
+            // The build-time secret (already in the binary): lets the e2e harness start a
+            // local Worker that accepts this build (signaling_roundtrip_wrangler).
+            "app_secret" => Ok(json!(config::APP_SECRET)),
             "forge_fingerprint" => {
                 self.debug_forge_fingerprint = args.get("on").and_then(Value::as_bool).unwrap_or(true);
                 Ok(json!(self.debug_forge_fingerprint))

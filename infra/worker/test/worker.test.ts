@@ -1,6 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { mintToken, verifyToken } from "../src/index";
+import { mintToken, verifyToken } from "../src/lib";
 
 const SECRET = "test-app-secret";
 const KEY = "test-signing-key";
