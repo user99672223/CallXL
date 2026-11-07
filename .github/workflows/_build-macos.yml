@@ -1,11 +1,12 @@
 # _build-macos — reusable iOS build on macos-latest (CLAUDE.md §8).
 #
 # Called by: ci.yml and release.yml.
-# Produces:  artifact `ios-ipa` containing CallXL-unsigned.ipa, after building
-#            CallXLCore.xcframework and `xcodebuild test` on an iOS Simulator.
+# Produces:  artifact `ios-ipa` with CallXL-unsigned.ipa and artifact
+#            `CallXLCore.xcframework` (zip), after the Bonjour backend tests,
+#            `xcodebuild test` on an iOS Simulator and `swiftformat --lint`.
 #            Scripts: packaging/ios/build-xcframework.sh, packaging/ios/build-unsigned-ipa.sh.
-# Until apps/ios and those scripts exist the job only reports that and outputs an empty
-# artifact name (release.yml then treats the IPA as missing).
+# The steps follow the iOS app's own macOS job; until apps/ios and those scripts exist the
+# job only reports that and outputs no artifact.
 name: _build-macos
 
 on:
@@ -29,8 +30,6 @@ on:
       ipa_artifact:
         description: artifact name ("" when not built)
         value: ${{ jobs.build.outputs.artifact }}
-      ipa_file:
-        value: ${{ jobs.build.outputs.file }}
 
 permissions:
   contents: read
@@ -41,6 +40,9 @@ env:
   CARGO_NET_RETRY: "10"
   RUSTC_WRAPPER: sccache
   SCCACHE_GHA_ENABLED: "true"
+  # Apple clang for the iOS SDK.
+  CC: clang
+  CXX: clang++
 
 jobs:
   build:
@@ -48,14 +50,13 @@ jobs:
     timeout-minutes: 120
     outputs:
       artifact: ${{ steps.ipa.outputs.artifact }}
-      file: ${{ steps.ipa.outputs.file }}
     steps:
       - uses: actions/checkout@v4
 
       - name: iOS app and packaging scripts present?
         id: present
         run: |
-          if [[ -d apps/ios && -f packaging/ios/build-xcframework.sh && -f packaging/ios/build-unsigned-ipa.sh ]]; then
+          if [[ -f apps/ios/project.yml && -f packaging/ios/build-xcframework.sh && -f packaging/ios/build-unsigned-ipa.sh ]]; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
@@ -69,11 +70,14 @@ jobs:
         run: |
           if [[ "$TAG" == *-* ]]; then scripts/check-version.sh --stamp "$TAG"; else scripts/check-version.sh "$TAG"; fi
 
-      - name: Rust toolchain + iOS targets
+      - name: Toolchains
         if: steps.present.outputs.ok == 'true'
         run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
           rustup show active-toolchain || rustup toolchain install
-          rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 
       - uses: mozilla-actions/sccache-action@v0.0.9
         if: steps.present.outputs.ok == 'true'
@@ -84,14 +88,25 @@ jobs:
           key: macos
           cache-on-failure: true
 
-      - name: Cache prebuilt libwebrtc (iOS device + simulator)
+      - name: Cache prebuilt iOS libwebrtc
         if: steps.present.outputs.ok == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/callxl/webrtc-a545de4
-          key: libwebrtc-webrtc-a545de4-ios
+          key: libwebrtc-webrtc-a545de4-ios-device-arm64-ios-simulator-arm64
 
-      - name: CallXLCore.xcframework
+      - name: XcodeGen; tokens up to date
+        if: steps.present.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          python3 packaging/ios/gen-tokens.py --check
+
+      - name: Bonjour (DNS-SD) discovery backend on Apple
+        if: steps.present.outputs.ok == 'true'
+        run: cargo test -p callxl-lan -- --nocapture
+
+      - name: Build CallXLCore.xcframework + Swift binding
         if: steps.present.outputs.ok == 'true'
         env:
           CALLXL_APP_SECRET: ${{ inputs.bake_app_secret && secrets.APP_SECRET || '' }}
@@ -99,15 +114,43 @@ jobs:
           if [[ -z "$CALLXL_APP_SECRET" ]]; then unset CALLXL_APP_SECRET; fi
           packaging/ios/build-xcframework.sh
 
-      - name: xcodebuild test (iOS Simulator)
+      - uses: actions/upload-artifact@v4
+        if: inputs.upload_artifacts && steps.present.outputs.ok == 'true'
+        with:
+          name: CallXLCore.xcframework
+          path: target/ios/CallXLCore.xcframework.zip
+          if-no-files-found: warn
+
+      - name: Generate Xcode project (XcodeGen)
         if: steps.present.outputs.ok == 'true'
         working-directory: apps/ios
+        run: xcodegen generate
+
+      - name: xcodebuild test on an iOS Simulator (bindings, audio session, CallKit, UI smoke)
+        if: steps.present.outputs.ok == 'true'
         run: |
           set -euo pipefail
-          if [[ -f project.yml ]]; then command -v xcodegen >/dev/null || brew install xcodegen; xcodegen generate; fi
-          sim="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].name')"
-          echo "simulator: $sim"
-          xcodebuild test -scheme CallXL -destination "platform=iOS Simulator,name=$sim" CODE_SIGNING_ALLOWED=NO | tail -50
+          xcrun simctl list devices available
+          UDID="$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)["devices"]
+          ios = sorted((k for k in d if "iOS" in k), key=lambda k: [int(x) for x in k.rsplit("iOS-", 1)[1].split("-")], reverse=True)
+          print(next(x["udid"] for k in ios for x in d[k] if x["name"].startswith("iPhone")))
+          ')"
+          echo "simulator: $UDID"
+          xcrun simctl boot "$UDID" || true
+          set +e
+          xcodebuild test \
+            -project apps/ios/CallXL.xcodeproj -scheme CallXL \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -derivedDataPath target/ios/DerivedData-test \
+            -resultBundlePath target/ios/CallXLTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO > target/ios/xcodebuild-test.log 2>&1
+          status=$?
+          set -e
+          grep -E "Test Case|Test Suite|error:|launch-to-home|bindings:|bonjour|Executed|failed" target/ios/xcodebuild-test.log || true
+          if [ "$status" -ne 0 ]; then tail -150 target/ios/xcodebuild-test.log; fi
+          exit "$status"
 
       - name: Unsigned IPA
         id: ipa
@@ -115,17 +158,30 @@ jobs:
         run: |
           set -euo pipefail
           packaging/ios/build-unsigned-ipa.sh
-          ipa="$(find . -name CallXL-unsigned.ipa -not -path './target/*' | head -1)"
-          test -n "$ipa"
-          mkdir -p dist && cp "$ipa" dist/CallXL-unsigned.ipa
-          unzip -l dist/CallXL-unsigned.ipa | grep -q 'Payload/CallXL.app/CallXL$'
-          ls -l dist
+          test -s target/ios/CallXL-unsigned.ipa
           echo "artifact=ios-ipa" >> "$GITHUB_OUTPUT"
-          echo "file=CallXL-unsigned.ipa" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         if: inputs.upload_artifacts && steps.ipa.outputs.artifact != ''
         with:
           name: ios-ipa
-          path: dist/CallXL-unsigned.ipa
+          path: target/ios/CallXL-unsigned.ipa
           if-no-files-found: error
+
+      - name: swiftformat --lint (pinned 0.64.6)
+        if: always() && steps.present.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/swiftformat.zip https://github.com/nicklockwood/SwiftFormat/releases/download/0.64.6/swiftformat.zip
+          unzip -o -q /tmp/swiftformat.zip -d /tmp/swiftformat
+          /tmp/swiftformat/swiftformat --version
+          /tmp/swiftformat/swiftformat --lint apps/ios
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.present.outputs.ok == 'true'
+        with:
+          name: ios-test-results
+          path: |
+            target/ios/CallXLTests.xcresult
+            target/ios/xcodebuild-test.log
+          if-no-files-found: ignore

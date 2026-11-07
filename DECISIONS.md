@@ -409,3 +409,35 @@ injected event, and what §4 requires to be inaudible is the switch. The new win
 contains the switch and the 6+ s after it. The same scenario passed in runs 42351643296
 and 42352890429 with the step inside the window (step landed in a quieter part of the
 test signal).
+
+D-0045 (2026-11-07, p2/infra-qa) — Correction to D-0044: why the delay step left no
+> 20 ms gap in runs 42351643296 and 42352890429 is not established (the failing gap was
+25 ms, just over the bound); the clause "step landed in a quieter part of the test
+signal" is a guess, not a finding.
+
+D-0046 (2026-11-07, p2/infra-qa) — Release mechanics. (1) The git proxy of this
+environment refuses tag pushes (HTTP 403 on `refs/tags/*`; branch pushes work), and the
+GitHub tools available here cannot create tags, so `v0.0.1-rc` cannot be pushed from the
+branch; the dry-run uses `workflow_dispatch` and `softprops/action-gh-release` creates the
+tag through the API at the dispatched commit. (2) The API answers 404 to a dispatch of a
+workflow that has never run and is not on the default branch: `release.yml` was registered
+by one commit (71fb38f) with a temporary branch-push trigger whose run skipped every job
+(run 42355852994), removed in the next commit. (3) The first dispatch (run 42355891400)
+passed every gate (meta, the three builds, all six netem legs) and failed in `release`
+because no platform package exists before the desktop/iOS branches merge (`dl/` was never
+created); `release` now tolerates that and, with `allow_partial`, publishes a Release whose
+`SHA256SUMS.txt` lists whatever exists.
+
+D-0047 (2026-11-07, p2/infra-qa) — Reusable Windows/macOS builds and the Linux package
+job copy the steps of the desktop and iOS agents' own CI jobs (branches `p2/desktop`
+93fd367, `p2/ios` 3b65790; Inno Setup defines, MSVC + static CRT, simulator pick,
+swiftformat pin, `--headless-smoke` < 1 s), each guarded by the presence of its app, so
+the merge replaces their inline jobs with calls without changing what is tested.
+`_build-linux.yml` has two jobs selected by inputs: `build` (debug, unit tests,
+`e2e-bins`, now including the debug `callxl` for `gui_join`) and `package` (fat-LTO
+release, `.deb`, install, launch < 1 s); `ci.yml` and `release.yml` call it twice so the
+LTO build never delays the e2e/netem fan-out (a caller's `needs:` waits for every job of a
+called workflow). `gui_join` runs in the `e2e loopback` leg, which already starts
+PulseAudio. `scripts/ci-webrtc-cache.sh` is taken verbatim from `p2/desktop` (same
+`webrtc.lib` check plus `cygpath`; Git Bash on windows-latest has `unzip`, so my 7-Zip
+fallback was dropped).
