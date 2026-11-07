@@ -14,8 +14,8 @@
  * delayed. During the initial grace period a usable IPv6 pair that is not worse
  * replaces an IPv4 pick (IPv6 preference at setup). The controlled agent
  * follows nominations, except that for kControlledFlapGuardMs after a change
- * it ignores DATA_RECEIVED switches back to the pair it just left: packets still in flight on the old (slower) path
- * otherwise flip the selection on every packet (CI: 9 flips in 60 ms after one
+ * it ignores DATA_RECEIVED switches back to the pair it just left: packets
+ * still in flight on the old (slower) path otherwise flip the selection on every packet (CI: 9 flips in 60 ms after one
  * controlling-side switch away from a 60 ms-delayed IPv6 path).
  * The controller runs on the network thread; it reports each switch it makes
  * through PeerConnectionObserverWrapper::on_ice_controller_decision, which on
@@ -49,6 +49,8 @@ struct ConnMetrics {
   size_t last_recv = 0;
   float loss = 0.f;  // EWMA of per-sample ping loss fraction
   int64_t lost = 0;  // pings known lost (cumulative)
+  int rtt_n = 0;       // rtt_samples() at the last RTT update
+  float rtt_ms = -1.f; // EWMA (0.7 new) of the latest per-response RTT
   int64_t qualifying_since_ms = -1;
   std::string qualifying_reason;
 };
@@ -152,6 +154,16 @@ class CallXlIceController final : public IceControllerInterface {
       } else if (m.last_sample_ms < 0) {
         m.lost = sent - recv - 1 > 0 ? sent - recv - 1 : 0;
       }
+      // libwebrtc's Connection::Rtt() weighs history 3:1 and backup pairs get a
+      // response only every 2-5 s, so after a path recovers it stays stale for
+      // tens of seconds (CI run 42348934002: 7 ms on a ~0 ms IPv6 pair, above the
+      // 5 ms IPv6 bonus, so the call never returned to IPv6). The policy uses the
+      // latest RTT samples instead, weighted 0.7 new.
+      if (c->rtt_samples() != m.rtt_n && info.current_round_trip_time_ms) {
+        const float x = static_cast<float>(*info.current_round_trip_time_ms);
+        m.rtt_ms = m.rtt_ms < 0.f ? x : 0.3f * m.rtt_ms + 0.7f * x;
+        m.rtt_n = c->rtt_samples();
+      }
       m.last_sent = static_cast<size_t>(sent);
       m.last_recv = static_cast<size_t>(recv);
       m.last_sample_ms = now;
@@ -169,11 +181,17 @@ class CallXlIceController final : public IceControllerInterface {
       const ConnMetrics& m = metrics_[c];
       t += std::string(" [") + (c == selected_ ? "*" : "") + (IsV6(c) ? "v6" : "v4") +
            " w" + std::to_string(c->writable()) + " r" + std::to_string(c->receiving()) +
-           " n" + std::to_string(c->rtt_samples()) + " rtt" + std::to_string(c->Rtt().ms()) +
+           " n" + std::to_string(c->rtt_samples()) + " rtt" + std::to_string(c->Rtt().ms()) + "/" +
+           std::to_string(m.rtt_ms < 0.f ? -1 : static_cast<int>(m.rtt_ms)) +
            " loss" + std::to_string(static_cast<int>(m.loss * 1000)) + "/1000 q" +
            std::to_string(m.qualifying_since_ms < 0 ? -1 : now - m.qualifying_since_ms) + "]";
     }
     RTC_LOG(LS_INFO) << t;
+  }
+
+  int64_t RttMs(const Connection* c) {
+    const ConnMetrics& m = metrics_[c];
+    return m.rtt_ms >= 0.f ? static_cast<int64_t>(m.rtt_ms + 0.5f) : c->Rtt().ms();
   }
 
   bool Usable(const Connection* c) const {
@@ -236,9 +254,9 @@ class CallXlIceController final : public IceControllerInterface {
           for (const Connection* c : inner_.GetConnections()) {
             if (!IsV6(c) || !Usable(c) ||
                 c->local_candidate().component() != pick->local_candidate().component() ||
-                c->Rtt().ms() > pick->Rtt().ms() + policy_.v6_bonus_ms)
+                RttMs(c) > RttMs(pick) + policy_.v6_bonus_ms)
               continue;
-            if (!v6 || c->Rtt() < v6->Rtt()) v6 = c;
+            if (!v6 || RttMs(c) < RttMs(v6)) v6 = c;
           }
           if (v6 && v6 != selected_) inner.connection = v6;
         }
@@ -253,7 +271,7 @@ class CallXlIceController final : public IceControllerInterface {
     // Stable selection: apply the CallXL policy.
     Trace(now);
     const ConnMetrics& sm = metrics_[selected_];
-    const int64_t sel_rtt = selected_->Rtt().ms();
+    const int64_t sel_rtt = RttMs(selected_);
     const Connection* best = nullptr;
     int64_t best_since = INT64_MAX;
     std::string best_reason;
@@ -264,7 +282,7 @@ class CallXlIceController final : public IceControllerInterface {
       std::string why;
       if (Usable(c) && c->local_candidate().component() ==
                            selected_->local_candidate().component()) {
-        const int64_t rtt = c->Rtt().ms();
+        const int64_t rtt = RttMs(c);
         if (sel_rtt - rtt >= policy_.rtt_delta_ms) {
           qualifies = true;
           why = "rtt " + std::to_string(sel_rtt) + "->" + std::to_string(rtt) + " ms";

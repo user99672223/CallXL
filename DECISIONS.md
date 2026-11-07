@@ -288,3 +288,14 @@ first, so with both families clean the call sometimes started on IPv4 (CI run
 would have moved it. Same run: `netem_path_switch_v4_to_v6` passed — IPv6→IPv4 at 8.0 s,
 back to IPv6 at 38.0 s (≥ 30 s cooldown), decisions exactly ["v6->v4: rtt 120->0 ms",
 "v4->v6: prefer-ipv6"].
+
+D-0035 (2026-11-07, phase1) — The switching policy uses its own RTT estimate per pair:
+EWMA (0.7 new) of `ConnectionInfo::current_round_trip_time_ms` on each new response,
+falling back to `Connection::Rtt()` before the first one. libwebrtc's `Rtt()` weighs
+history 3:1 and its one-ping-per-tick scheduler gives backup pairs a response only every
+2–5 s here (configured 500 ms), so after IPv6 recovered its RTT read 120 → 38 → 7 ms and
+stalled above the 5 ms IPv6 bonus for > 40 s while the real RTT was ~0 (CI run
+42348934002 trace, `netem_path_switch_v4_to_v6`, alice controlling; it passed in run
+42347801925 with bob controlling only because that side got more samples). The sustain
+(5 s), cooldown (30 s) and Δ (15 ms) thresholds are unchanged. Local check on a stable
+49 ms path: own estimate 47–50 ms vs libwebrtc 49 ms.
