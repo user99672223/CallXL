@@ -667,3 +667,16 @@ and upload them as `desktop-metrics-{linux,windows}` artifacts, so the numbers c
 without the full job log; the ci.yml `e2e loopback` job keeps `gui_join` and saves its
 output as `e2e-artifacts-gui/gui_join.txt`. Artifact names `CallXL-Setup.exe` (in
 `windows-installer`) and `callxl_<ver>_amd64.deb` (in `linux-deb`) are unchanged.
+
+D-0131 (2026-11-07, p2/desktop) — Startup measurement and the deferred tray. `--headless-
+smoke` now reports `ui_ms` (first frame actually rendered, via Slint's rendering notifier)
+and `core_ms` (`CallXl::start` returned) separately; `startup_ms` is when both are done.
+The tray icon is created on the first event-loop turn after `show()` instead of before
+the window: with a session bus but no StatusNotifier host (CI after the .deb pulled in
+xdg-desktop-portal/PipeWire as Recommends) the second launch measured `startup_ms=2394`
+(run 42362385739, first launch 337); after the change the three launches measured
+474 / 141 / 142 ms with `ui_ms` 474 / 136 / 137 and `core_ms` 130 / 141 / 142 (run
+42364027461). The cause of the 2.4 s stall was not isolated beyond "UI thread before the
+first frame"; the tray registration was the only blocking D-Bus call there and no longer
+is. Earlier runs measured a looser "window shown" point (first event-loop turn after
+`show()`): 40 / 166 / 164 ms (run 42357197946), 33 / 145 / 144 ms (run 42361333414).
