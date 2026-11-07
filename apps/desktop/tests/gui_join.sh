@@ -18,7 +18,8 @@ WORK="$(mktemp -d)"
 GUI_PID=""
 CLI_PID=""
 cleanup() {
-  [[ -n "$GUI_PID" ]] && kill "$GUI_PID" 2>/dev/null || true
+  # xvfb-run runs in its own process group (setsid): stop it, Xvfb and the app together.
+  [[ -n "$GUI_PID" ]] && kill -- "-$GUI_PID" 2>/dev/null || true
   [[ -n "$CLI_PID" ]] && kill "$CLI_PID" 2>/dev/null || true
   wait 2>/dev/null || true
   if [[ -n "${CALLXL_E2E_ARTIFACTS:-}" ]]; then
@@ -66,7 +67,7 @@ SID="$(ctl create_session '{"name":"gui-join"}' | python3 -c 'import json,sys; p
 echo "session created by the CLI peer: $SID"
 
 T0=$(date +%s.%N)
-CALLXL_DEBUG_AUTOJOIN=1 xvfb-run -a "$GUI" --data-dir "$WORK/gui" >"$WORK/gui.log" 2>&1 &
+CALLXL_DEBUG_AUTOJOIN=1 setsid xvfb-run -a "$GUI" --data-dir "$WORK/gui" >"$WORK/gui.log" 2>&1 &
 GUI_PID=$!
 
 need_audio="${CALLXL_GUI_JOIN_AUDIO:-0}"
