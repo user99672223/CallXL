@@ -99,11 +99,13 @@ enum WebRTCAudioBridge {
 @MainActor
 final class CallAudioController {
     private let log = Logger(subsystem: "com.callxl.app", category: "audio")
-    private let session: AudioSessionConfiguring
+    private let makeSession: () -> AudioSessionConfiguring
+    /// Created on first use: `AVAudioSession.sharedInstance()` costs launch time.
+    private lazy var session: AudioSessionConfiguring = makeSession()
     private var activatedByUs = false
 
-    init(session: AudioSessionConfiguring = AVAudioSession.sharedInstance()) {
-        self.session = session
+    init(session: @escaping @autoclosure () -> AudioSessionConfiguring = AVAudioSession.sharedInstance()) {
+        makeSession = session
     }
 
     /// At launch: WebRTC uses §8's configuration, and with CallKit it waits for the

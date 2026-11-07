@@ -117,6 +117,16 @@ schemes:
       gatherCoverageData: false
       targets:
         - CallXLTests
-        - CallXLUITests
     archive:
       config: Release
+  # UI smoke + launch time on the optimised Release build (what users run, §1.5).
+  CallXLUI:
+    build:
+      targets:
+        CallXL: all
+        CallXLUITests: [test]
+    test:
+      config: Release
+      gatherCoverageData: false
+      targets:
+        - CallXLUITests

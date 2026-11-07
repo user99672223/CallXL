@@ -49,7 +49,8 @@ for t in "${TARGETS[@]}"; do
     cargo rustc -p callxl-core --lib --crate-type cdylib --release --target "$t" -- \
       -C link-arg=-Wl,-install_name,@rpath/$FW.framework/$FW \
       -C link-arg=-ObjC \
-      -C link-arg=-Wl,-dead_strip
+      -C link-arg=-Wl,-dead_strip \
+      -C link-arg=-Wl,-dead_strip_dylibs
   lib="$TARGET_DIR/$t/release/libcallxl_core.dylib"
   ls -l "$lib"
   file "$lib"
