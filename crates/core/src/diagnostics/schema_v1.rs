@@ -180,6 +180,9 @@ pub fn validate(v: &Value) -> Result<(), Vec<String>> {
         Some(SCHEMA_VERSION) => {}
         other => c.err("$.schema", format!("expected {SCHEMA_VERSION}, got {other:?}")),
     }
+    if top.get("app").and_then(Value::as_str) != Some("CallXL") {
+        c.err("$.app", "expected \"CallXL\"");
+    }
     c.string(top, "$", "app_version");
     c.int(top, "$", "ts");
 

@@ -141,6 +141,7 @@ pub fn build(snap: &Snapshot, diag: &DiagnosticsSnapshot, log: &[String], home: 
 
     json!({
         "schema": SCHEMA_VERSION,
+        "app": "CallXL",
         "app_version": env!("CARGO_PKG_VERSION"),
         "platform": {
             "os": std::env::consts::OS,

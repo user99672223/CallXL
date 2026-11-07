@@ -497,3 +497,24 @@ D-0082 (2026-11-07, p2/infra-qa) — After rebasing onto the integration branch 
 d293752 of PR #1, which added phase1's D-0037/D-0038), this branch's entries were
 renumbered from D-0037…D-0048 to D-0070…D-0081 (cross-references inside them updated).
 D-0037…D-0049 are taken by phase1 and p2/ios, D-0050…D-0069 by p2/desktop; p2/infra-qa uses D-0070+.
+
+D-0083 (2026-11-07, p2/infra-qa) — Diagnostics export v1 also carries `app: "CallXL"`
+(additive; validated). The p2/ios test `BindingsTests.testCoreLifecycleThroughBindings`
+asserts `json["app"] == "CallXL"` and `json["diagnostics"] != nil`, i.e. the pre-v1 shape;
+with my branch and p2/ios merged it failed on exactly those lines (integration check,
+release run 42358935791, macOS job: "XCTAssertEqual failed: ("nil") is not equal to
+("Optional("CallXL")")"). `app` now passes; the second assertion must change on the iOS
+side to the v1 shape (`json["schema"] as? Int == 1`, `json["global"] != nil`, see
+docs/diagnostics-export.md). Reported to the orchestrator.
+
+D-0084 (2026-11-07, p2/infra-qa) — Integration check (throwaway branch
+`p2/infra-qa-integration-check` = this branch + `p2/desktop` + `p2/ios`, `ci.yml` resolved
+to the reusable calls): release run 42358935791 with `allow_partial: false` and tag
+`v0.0.2-rc` passed meta, linux build, linux-package (fat-LTO desktop, `.deb` stamped
+0.0.2-rc, installed, launched) and all six netem legs, then refused to publish:
+"missing release artifacts: CallXL-Setup.exe CallXL-unsigned.ipa (windows job: failure,
+macos job: failure)", the loud failure the brief requires. Windows failed in the app's own
+build set-up (MSVC under Git Bash: `/usr/bin/link` shadows `link.exe` under vcvars), which
+p2/desktop was still fixing (its own run 42357923913 also fails); macOS failed on the iOS
+test of D-0083. Neither is a workflow defect; the reusable builds follow those jobs and
+will be re-synced from the merged versions.

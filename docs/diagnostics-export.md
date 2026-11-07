@@ -26,6 +26,7 @@ keys they do not know. Removing or renaming a key, or changing its type or unit,
 | Key | Type | Meaning |
 |---|---|---|
 | `schema` | int | `1` |
+| `app` | string | `"CallXL"` (identifies the file) |
 | `app_version` | string | `callxl-core` crate version |
 | `platform` | object | `os`, `arch` (Rust `std::env::consts`), `debug_build` (bool), `dev_app_secret` (bool: built without the `APP_SECRET` CI secret) |
 | `ts` | int | Unix ms when the report was generated |
@@ -106,6 +107,7 @@ an audio device name and the home directory appear nowhere in the text.
 ```json
 {
   "schema": 1,
+  "app": "CallXL",
   "app_version": "0.1.0",
   "platform": { "os": "linux", "arch": "x86_64", "debug_build": true, "dev_app_secret": true },
   "ts": 1794038131974,
