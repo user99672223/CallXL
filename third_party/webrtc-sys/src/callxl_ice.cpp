@@ -13,8 +13,8 @@
  * Failover (selected pair destroyed / not writable / not receiving) is never
  * delayed. During the initial grace period a usable IPv6 pair that is not worse
  * replaces an IPv4 pick (IPv6 preference at setup). The controlled agent
- * follows nominations, except that for kControlledFlapGuardMs after a change it ignores DATA_RECEIVED switches back
- * to the pair it just left: packets still in flight on the old (slower) path
+ * follows nominations, except that for kControlledFlapGuardMs after a change
+ * it ignores DATA_RECEIVED switches back to the pair it just left: packets still in flight on the old (slower) path
  * otherwise flip the selection on every packet (CI: 9 flips in 60 ms after one
  * controlling-side switch away from a 60 ms-delayed IPv6 path).
  * The controller runs on the network thread; it reports each switch it makes
