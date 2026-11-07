@@ -59,6 +59,7 @@ export component AppWindow inherits Window {
 
     // Exposed for the screenshot tests and the headless smoke check.
     in-out property <bool> ui-ready;
+    callback core-started();
 
     HorizontalLayout {
         // Navigation rail.

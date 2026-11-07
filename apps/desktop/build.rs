@@ -112,11 +112,9 @@ fn main() {
     let tokens_slint = out_dir.join("tokens.slint");
     write_if_changed(&tokens_slint, &slint);
 
-    let config = slint_build::CompilerConfiguration::new()
-        .with_style("fluent".into())
-        .with_library_paths(
-            [("tokens".to_string(), tokens_slint), ("icons".to_string(), design.join("icons"))].into_iter().collect(),
-        );
+    let config = slint_build::CompilerConfiguration::new().with_style("fluent".into()).with_library_paths(
+        [("tokens".to_string(), tokens_slint), ("icons".to_string(), design.join("icons"))].into_iter().collect(),
+    );
     slint_build::compile_with_config("ui/app.slint", config).expect("Slint UI failed to compile");
 
     // Windows: embed the app icon into callxl.exe (host == target in CI).

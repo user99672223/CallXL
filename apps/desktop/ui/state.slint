@@ -59,7 +59,7 @@ export struct ChatItem {
 export struct Metric {
     label: string,
     value: string,
-    // Sparkline as SVG path commands in a 100 x 30 viewbox ("" = none).
+    // Sparkline as SVG path commands in a 100 x 15 viewbox ("" = none).
     spark: string,
 }
 
@@ -186,5 +186,4 @@ export global App {
     callback set-signaling-url(string);
     callback set-theme(bool);
     callback export-diagnostics();
-    callback copy-text(string);
 }

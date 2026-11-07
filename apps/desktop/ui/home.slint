@@ -31,6 +31,7 @@ component SessionCard inherits Rectangle {
         VerticalLayout {
             alignment: center;
             spacing: Space.xs;
+            horizontal-stretch: 1;
             HorizontalLayout {
                 spacing: Space.sm;
                 Text {
@@ -166,11 +167,13 @@ export component HomeScreen inherits Rectangle {
                     alignment: center;
                     spacing: Space.md;
                     padding: Space.xxl;
-                    Icon {
-                        x: (parent.width - self.width) / 2;
-                        path: Icons.lan;
-                        size: 40px;
-                        color: Colors.text-muted;
+                    HorizontalLayout {
+                        alignment: center;
+                        Icon {
+                            path: Icons.lan;
+                            size: 40px;
+                            color: Colors.text-muted;
+                        }
                     }
                     Text {
                         horizontal-alignment: center;
