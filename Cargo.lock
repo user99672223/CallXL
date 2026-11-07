@@ -439,7 +439,9 @@ name = "callxl-e2e"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "blake3",
+ "callxl-signal",
  "hound",
  "rand 0.8.8",
  "serde_json",

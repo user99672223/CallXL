@@ -36,3 +36,8 @@ the upstream `RtcConfiguration` struct does not carry: `port_allocator_config.fl
 
 The upstream name `create_peer_connection_factory_with_options(bool, bool)` was already
 taken, so the CallXL factory is `create_callxl_peer_connection_factory`.
+
+`create_callxl_audio_track` leaves the APM fields of the source's `AudioOptions` unset and
+applies the requested APM config directly (`callxl_apply_apm`): the voice engine
+re-applies the source options on every send-stream reconfiguration (each renegotiation)
+and otherwise resets the live APM config (DECISIONS.md D-0024).

@@ -2,6 +2,7 @@
 //! collects events, samples diagnostics, and stores logs/recordings/stats as artifacts.
 
 pub mod audio;
+pub mod mitm;
 pub mod netem;
 pub mod worker;
 
@@ -362,7 +363,7 @@ pub async fn sample_every(peer: &Peer, t0: Instant, secs: f64, every: Duration) 
 
 pub fn brief(p: &Value) -> String {
     format!(
-        "t={:>5.1} send={:>6.1} target={:>6.1} payload={:>6.1} bwe={:>5.0} frame={} ana={}/{:.1}% rtt={:>5.1} loss={:>4.1}/{:>4.1} path={}/{} sw={}",
+        "t={:>5.1} send={:>6.1} target={:>6.1} payload={:>6.1} bwe={:>5.0} frame={} ana={}/{:.1}% rtt={:>5.1} loss={:>4.1}/{:>4.1} path={}/{}@{} sw={}",
         p["t"].as_f64().unwrap_or(0.0),
         p["send_kbps"].as_f64().unwrap_or(0.0),
         p["opus_bitrate_kbps"].as_f64().unwrap_or(0.0),
@@ -376,6 +377,7 @@ pub fn brief(p: &Value) -> String {
         p["remote_loss_pct"].as_f64().unwrap_or(0.0),
         p["path"]["kind"].as_str().unwrap_or("-"),
         p["path"]["local_family"].as_str().unwrap_or("-"),
+        p["path"]["local_addr"].as_str().unwrap_or("-"),
         p["pair_switches"],
     )
 }

@@ -144,11 +144,11 @@ std::shared_ptr<AudioTrack> PeerConnectionFactory::create_callxl_audio_track(
     CallXlApmSettings apm,
     bool ana) const {
   webrtc::AudioOptions options;
-  options.echo_cancellation = apm.aec;
-  // AGC1 stays off: AGC2 is configured directly on the APM (callxl_apply_apm).
-  options.auto_gain_control = false;
-  options.noise_suppression = apm.ns;
-  options.highpass_filter = apm.high_pass;
+  // The APM fields (echo_cancellation, auto_gain_control, noise_suppression,
+  // highpass_filter) are deliberately left unset: the voice engine re-applies the
+  // source's options on every send-stream (re)configuration, i.e. on every
+  // renegotiation, and would reset the user's live APM config (NS forced to kHigh,
+  // AEC back on) until the next readback. CallXL owns the APM: callxl_apply_apm.
   options.audio_jitter_buffer_fast_accelerate = true;
   if (ana) {
     // Any non-empty config enables the ANA; our encoder factory ignores its content.
@@ -158,6 +158,7 @@ std::shared_ptr<AudioTrack> PeerConnectionFactory::create_callxl_audio_track(
   webrtc::scoped_refptr<webrtc::AudioSourceInterface> source =
       peer_factory_->CreateAudioSource(options);
   if (!source) return nullptr;
+  callxl_apply_apm(apm);
   return std::static_pointer_cast<AudioTrack>(
       rtc_runtime_->get_or_create_media_stream_track(
           peer_factory_->CreateAudioTrack(label.c_str(), source.get())));

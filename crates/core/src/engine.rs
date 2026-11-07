@@ -148,6 +148,9 @@ pub(crate) struct Core {
     pub prompted: HashSet<PeerKey>,
     pub transfers: crate::files::Transfers,
     pub rejected_signaling: u64,
+    /// Test hook (`debug forge_fingerprint`): sign offers/answers with a DTLS fingerprint
+    /// that does not match the SDP — a validly signed but lying peer.
+    pub debug_forge_fingerprint: bool,
     pub glare_events: u64,
     pub link_views: watch::Sender<DiagInputs>,
     pub last_stats: Option<DiagnosticsSnapshot>,
@@ -384,6 +387,10 @@ impl Core {
                     })
                     .collect();
                 Ok(Value::Array(v))
+            }
+            "forge_fingerprint" => {
+                self.debug_forge_fingerprint = args.get("on").and_then(Value::as_bool).unwrap_or(true);
+                Ok(json!(self.debug_forge_fingerprint))
             }
             "restart_ice" => {
                 let keys: Vec<_> = self.links.keys().cloned().collect();
@@ -661,6 +668,15 @@ impl Core {
     pub fn send_peer_fp<T: serde::Serialize>(&mut self, key: &str, kind: Kind, payload: &T, fp: Option<&str>) -> bool {
         let Some(entry) = self.dir.get(key) else { return false };
         let sid = self.current_session().map(str::to_string);
+        let forged = fp.filter(|_| self.debug_forge_fingerprint).map(|f| {
+            let mut b = f.to_string().into_bytes();
+            let digest = b.iter().rposition(|c| *c == b' ').map_or(0, |i| i + 1);
+            if let Some(c) = b[digest..].iter_mut().find(|c| c.is_ascii_hexdigit()) {
+                *c = if *c == b'0' { b'1' } else { b'0' };
+            }
+            String::from_utf8(b).unwrap_or_default()
+        });
+        let fp = forged.as_deref().or(fp);
         let env = match self.crypto.seal(kind, Some(&entry.card), sid.as_deref(), fp, &schema::encode(payload)) {
             Ok(e) => e,
             Err(e) => {

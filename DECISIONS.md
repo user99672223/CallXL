@@ -179,3 +179,25 @@ audio RTCP report interval (5 s, fixed for libwebrtc receive streams; only the s
 measured 24 s (averaged loss < 1 % 8 s after the loss cleared, switch 15 s later), so
 `netem_frame_adaptation` observes 32 s of clean network instead of 25 s. The §3 rule
 itself is unchanged.
+
+D-0024 (2026-11-07, phase1) — The microphone source's `AudioOptions` no longer carry the
+APM fields (echo_cancellation, auto_gain_control, noise_suppression, highpass_filter);
+CallXL applies the APM config itself (`callxl_apply_apm`) right after creating the
+source. The voice engine re-applies the source options on every send-stream
+reconfiguration, i.e. on every renegotiation, which reset the user's live config (AEC
+back on, NS forced to High) until the 1 Hz readback of D-0019 restored it. Measured with
+3 renegotiations in 6 s (AEC off on both sides): before, far-end recordings had 3 and 6
+gaps > 20 ms (longest 555 ms) and 4 "APM drifted" re-applies per side; after, 0 gaps and 0
+drifts. D-0019's readback stays as a safety net.
+
+D-0025 (2026-11-07, phase1) — Tampered-signaling coverage: the signature covers the
+ciphertext, so a man in the middle flipping a ciphertext byte or the `fp` field is
+caught by Ed25519 verification before decryption ("the message signature is invalid").
+The fingerprint comparison itself is exercised by a validly signed but lying peer: a
+debug hook (`debug forge_fingerprint`) makes the sender sign an `fp` that differs from
+the SDP's `a=fingerprint`; the receiver refuses it before `set_remote_description`.
+
+D-0026 (2026-11-07, phase1) — The ICE controller keeps its own recheck chain alive from
+the first selection on (500 ms). In a stable call libwebrtc requests no sorts, so the
+CallXL switching policy was never evaluated: CI run 42340608231 showed no controller
+decision in 12 s with the selected IPv6 pair at 120 ms RTT and IPv4 at ~0 ms.

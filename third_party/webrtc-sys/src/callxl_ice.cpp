@@ -171,6 +171,10 @@ class CallXlIceController final : public IceControllerInterface {
         last_switch_ms_ = now;
         Report("failover");
       }
+      // Keep a recheck chain alive: in a stable call libwebrtc requests no sorts at
+      // all, so without it the policy below would never be evaluated (observed: no
+      // decision in 12 s with the selected IPv6 pair at 120 ms RTT vs ~0 ms IPv4).
+      if (!inner.recheck_event) inner.recheck_event = Recheck(now).recheck_event;
       return inner;
     }
 

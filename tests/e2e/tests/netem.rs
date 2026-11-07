@@ -14,6 +14,16 @@ use callxl_e2e::*;
 use serde_json::{Value, json};
 
 const CONNECT: Duration = Duration::from_secs(30);
+/// libwebrtc's selected-pair switches in the peer logs (artifacts) for the path tests.
+const ICE_LOG: &[(&str, &str)] = &[("CALLXL_RTC_LOG", "Switching selected connection|Changed selected connection")];
+
+async fn decisions(a: &Peer, b: &Peer) {
+    for p in [a, b] {
+        if let Ok(l) = p.debug("link_info").await {
+            eprintln!("{} controller decisions: {}", p.name, l[0]["controller_decisions"]);
+        }
+    }
+}
 
 fn f(p: &Value, k: &str) -> f64 {
     p[k].as_f64().unwrap_or(0.0)
@@ -184,7 +194,7 @@ async fn netem_path_switch_v6_to_v4() -> Result<()> {
     let h = Harness::new("netem_path_switch_v6_to_v4")?;
     let netem = Netem::new().await?;
     netem.clear()?;
-    let (a, b) = internet_pair(&h, &netem, &["::1", "127.0.0.1"], false).await?;
+    let (a, b) = internet_pair_env(&h, &netem, &["::1", "127.0.0.1"], false, ICE_LOG).await?;
     call_all(&[&a, &b], CONNECT).await?;
     let t0 = Instant::now();
     let mut s = sample(&a, t0, 4.0).await?;
@@ -198,6 +208,7 @@ async fn netem_path_switch_v6_to_v4() -> Result<()> {
         s.iter().find(|p| f(p, "t") > degrade && p["path"]["local_family"] == "V4").map(|p| f(p, "t") - degrade);
     let last = s.last().cloned().unwrap_or_default();
     eprintln!("switched to V4 {switched:?} s after degrading IPv6; switches = {}", last["pair_switches"]);
+    decisions(&a, &b).await;
     ensure!(switched.is_some_and(|t| t <= 10.0), "no switch to IPv4 within 10 s");
     ensure!(last["pair_switches"] == 1, "expected exactly one switch, got {}", last["pair_switches"]);
     netem.clear()?;
@@ -214,11 +225,14 @@ async fn netem_path_switch_v4_to_v6() -> Result<()> {
     let h = Harness::new("netem_path_switch_v4_to_v6")?;
     let netem = Netem::new().await?;
     netem.set(Family::V6, Impairment { delay_ms: 60, ..Impairment::CLEAN })?;
-    let (a, b) = internet_pair(&h, &netem, &["::1", "127.0.0.1"], false).await?;
+    let (a, b) = internet_pair_env(&h, &netem, &["::1", "127.0.0.1"], false, ICE_LOG).await?;
     call_all(&[&a, &b], CONNECT).await?;
     let t0 = Instant::now();
     let mut s = sample(&a, t0, 12.0).await?;
     let first = s.iter().find(|p| p["pair_switches"] == 1 && p["path"]["local_family"] == "V4").map(|p| f(p, "t"));
+    if first.is_none() {
+        decisions(&a, &b).await;
+    }
     ensure!(first.is_some(), "did not move off the degraded IPv6 path");
     let first = first.unwrap();
     netem.set(Family::V6, Impairment::CLEAN)?;

@@ -173,8 +173,8 @@ pub struct MediaEngine {
 unsafe impl Send for MediaEngine {}
 unsafe impl Sync for MediaEngine {}
 
-/// Debug only: `CALLXL_RTC_LOG=<substring>` prints libwebrtc log lines containing it
-/// (`CALLXL_RTC_LOG=*` for all) to stderr. Never set in production: the sink runs on
+/// Debug only: `CALLXL_RTC_LOG=<a>|<b>|…` prints libwebrtc log lines containing any of
+/// the substrings (`CALLXL_RTC_LOG=*` for all) to stderr. Never set in production: the sink runs on
 /// libwebrtc threads.
 fn install_rtc_log_sink() {
     static FILTER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -184,7 +184,7 @@ fn install_rtc_log_sink() {
     }
     fn sink(msg: String, sev: webrtc_sys::webrtc::ffi::LoggingSeverity) {
         let f = FILTER.get().map(String::as_str).unwrap_or("*");
-        if f == "*" || msg.contains(f) {
+        if f == "*" || f.split('|').any(|p| msg.contains(p)) {
             eprintln!("rtc[{sev:?}] {}", msg.trim_end());
         }
     }

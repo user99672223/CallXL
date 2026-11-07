@@ -315,6 +315,7 @@ impl CallXl {
                 transfers,
                 rejected_signaling: 0,
                 glare_events: 0,
+                debug_forge_fingerprint: false,
                 link_views: views_tx,
                 last_stats: None,
                 stopping: false,
