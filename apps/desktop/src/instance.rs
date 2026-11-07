@@ -39,7 +39,9 @@ pub fn acquire(name: &str, on_show: impl Fn() + Send + 'static) -> std::io::Resu
                 })?;
                 return Ok(Instance::Primary);
             }
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            // Linux: AddrInUse. Windows: the first pipe instance was created with
+            // FILE_FLAG_FIRST_PIPE_INSTANCE, so another creation is "Access is denied".
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied) => {
                 if let Ok(mut s) = Stream::connect(ns.clone()) {
                     let _ = s.write_all(b"show\n");
                     let _ = s.flush();
