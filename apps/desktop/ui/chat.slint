@@ -81,7 +81,7 @@ component Bubble inherits Rectangle {
         alignment: start;
         if !root.item.own: Muted {
             x: Space.sm;
-            text: root.item.sender + "  ·  " + root.item.time;
+            text: root.item.time == "" ? root.item.sender : root.item.sender + "  ·  " + root.item.time;
         }
         HorizontalLayout {
             alignment: root.item.own ? end : start;

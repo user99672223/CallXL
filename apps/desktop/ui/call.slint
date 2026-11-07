@@ -31,12 +31,14 @@ component Tile inherits Rectangle {
         padding: Space.lg;
         spacing: Space.sm;
         alignment: center;
-        Avatar {
-            x: (parent.width - self.width) / 2;
-            initials: root.peer.initials;
-            hue: root.peer.hue;
-            size: 64px;
-            opacity: root.peer.connected || root.peer.is-self ? 1 : 0.5;
+        HorizontalLayout {
+            alignment: center;
+            Avatar {
+                initials: root.peer.initials;
+                hue: root.peer.hue;
+                size: 64px;
+                opacity: root.peer.connected || root.peer.is-self ? 1 : 0.5;
+            }
         }
         Text {
             horizontal-alignment: center;
@@ -151,7 +153,10 @@ export component CallScreen inherits Rectangle {
             VerticalLayout {
                 alignment: center;
                 spacing: Space.md;
-                Icon { x: (parent.width - self.width) / 2; path: Icons.upload; size: 40px; color: Colors.accent; }
+                HorizontalLayout {
+                    alignment: center;
+                    Icon { path: Icons.upload; size: 40px; color: Colors.accent; }
+                }
                 Text {
                     horizontal-alignment: center;
                     text: "Drop to send";

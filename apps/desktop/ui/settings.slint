@@ -1,7 +1,7 @@
-import { ScrollView, LineEdit, Slider, ComboBox } from "std-widgets.slint";
+import { ScrollView, LineEdit, ComboBox } from "std-widgets.slint";
 import { Colors, Space, Radius, Motion, Type, Size } from "@tokens";
 import { App, AudioDeviceItem } from "state.slint";
-import { Icons, Icon, Label, Muted, Title, Card, Button, ToggleRow, SectionHeader, Avatar, Dot } from "widgets.slint";
+import { Icons, Icon, Label, Muted, Title, Card, Button, ToggleRow, SectionHeader, Avatar, Dot, ValueSlider } from "widgets.slint";
 
 component Section inherits Card {
     in property <string> heading;
@@ -99,7 +99,7 @@ export component SettingsScreen inherits Rectangle {
                         font-family: Type.family;
                     }
                 }
-                Slider {
+                ValueSlider {
                     minimum: 32;
                     maximum: 510;
                     value: App.bitrate;

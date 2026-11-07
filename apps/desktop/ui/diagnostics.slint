@@ -21,7 +21,7 @@ component MetricCell inherits Rectangle {
             font-family: Type.family;
             overflow: elide;
         }
-        Sparkline { height: 18px; commands: root.m.spark; }
+        Sparkline { commands: root.m.spark; }
     }
 }
 
@@ -29,7 +29,7 @@ component MetricCell inherits Rectangle {
 component MetricGrid inherits Rectangle {
     in property <[Metric]> metrics;
     property <length> gap: Space.sm;
-    property <int> cols: max(1, floor((self.width + gap) / (170px + gap)));
+    property <int> cols: max(1, floor((self.width + gap) / (200px + gap)));
     property <length> cell-w: (self.width - (cols - 1) * gap) / cols;
     height: ceil(metrics.length / cols) * (76px + gap) - gap;
     for m[i] in root.metrics: MetricCell {

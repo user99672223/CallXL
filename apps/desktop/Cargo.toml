@@ -19,6 +19,17 @@ path = "src/main.rs"
 callxl-core = { workspace = true }
 slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software", "system-tray", "unstable-winit-030"] }
 
+notify-rust = "4.18"
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+interprocess = "2.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+png = "0.18"
+
 [build-dependencies]
 slint-build = "=1.18.1"
 serde_json = { workspace = true }
