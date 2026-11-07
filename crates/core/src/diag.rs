@@ -202,6 +202,7 @@ pub fn spawn(
                     ("opus_frame_ms", f64::from(ps.opus_frame_ms)),
                     ("jitter_buffer_ms", ps.jitter_buffer_ms),
                     ("concealment_events", ps.concealment_events as f64),
+                    ("pair_switches", f64::from(ps.pair_switches)),
                 ] {
                     rings.push(&format!("{m}:{tag}"), v);
                 }
@@ -214,6 +215,7 @@ pub fn spawn(
             rings.push("uplink_kbps", up);
             rings.push("downlink_kbps", down);
             rings.push("media_thread_cpu_pct", cpu_pct);
+            rings.push("signaling_latency_ms", inp.signaling_latency_ms);
             rings.push("ana_frame_ms", f64::from(ana.frame_length_ms.max(0)));
             rings.push("ana_switches", f64::from(ana.switches.max(0)));
             if turn_delta > 0 {
