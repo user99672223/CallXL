@@ -345,3 +345,212 @@ due time; a timer firing ≥ 2 ms early ended the chain and the switching policy
 for the rest of the call (no evaluation at all on either side of
 `netem_path_switch_v4_to_v6`, which therefore never returned to IPv6). Any recheck in the
 second half of the pending window now counts.
+D-0070 (2026-11-07, p2/infra-qa) — `worker.yml`: every run (any branch touching
+`infra/worker/**`) runs the vitest suite and `wrangler deploy --dry-run` (bundles and
+validates bindings without credentials); it deploys only on the integration branch, `main`
+or a manual dispatch, and only when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
+exist (checked through step `env:`, since `if:` cannot read secrets). Otherwise it prints
+the manual set-up steps (also to the job summary) and is green. `TOKEN_SIGNING_KEY`
+persistence: generated with `openssl rand -hex 32` only when `wrangler secret list` does
+not show it, so it lives solely in Cloudflare's secret store and survives every redeploy;
+CI never rotates it (rotation would invalidate all live 1-hour tokens), and a failing
+`secret list` fails the job rather than silently generating a new key. `APP_SECRET` is
+re-put on each deploy (`wrangler secret put` overwrites idempotently). Optional
+`TURN_KEY_ID`/`TURN_API_TOKEN` repository secrets are forwarded when present.
+
+D-0071 (2026-11-07, p2/infra-qa) — Diagnostics export schema v1
+(`docs/diagnostics-export.md`): top-level `{schema, app_version, platform, ts, call,
+peers, global, series, log_tail}`, `series` as an object metric → ≤ 60 numbers, ≤ 1000 log
+lines. Writers may only add keys within v1; anything else bumps `schema`. Redaction:
+peers are public key + 8-hex tag (no display names except the user's own), no session
+names, file names, paths, device names or trusted-device list; in log lines known peer
+names → `peer:<tag>`, transfer file names → `<file>` (`files.rs` logs them on resume),
+the home directory → `~`. The validator (`crates/core/src/diagnostics/schema_v1.rs`)
+depends only on `serde_json` and is included by the e2e crate with `#[path]`: one rule
+set for unit and e2e tests without making the e2e test binaries link the core and
+libwebrtc. The export file is now `CallXL-diagnostics-<ts>.json` (brief's interface; was
+`callxl-diagnostics-`). `CallXl.config` (only read by the old export for `data_dir`,
+which the new report leaves out as a local path) was removed. Evidence: `export_schema_v1`
+on a real recorded snapshot (fixture captured from `diagnostics_complete`, proxy backend)
+and `diagnostics_complete` validating the live export (local: "export: schema v1 valid,
+6343 bytes, 16 series, 4 log lines").
+
+D-0072 (2026-11-07, p2/infra-qa) — Release versions: `scripts/check-version.sh` compares
+the tag (without `v`) to `apps/desktop/Cargo.toml` (or the workspace version it
+inherits). A final tag `vX.Y.Z` must match exactly and fails early otherwise. A
+prerelease tag `vX.Y.Z-<pre>` (e.g. the `v0.0.1-rc` dry-run while the code says 0.1.0)
+is *stamped*: the workflow writes the tag's version into the manifest before building,
+then checks, so every artifact and `CARGO_PKG_VERSION` carry the prerelease version. The
+`.deb` asset is published as `callxl_<tag version>_amd64.deb` (cargo-deb spells
+prereleases Debian-style, `0.0.1~rc`, inside the package; GitHub would mangle `~` in an
+asset name). Prerelease = tag contains `-`.
+
+D-0073 (2026-11-07, p2/infra-qa) — CI job graph: `lint` (fmt + clippy), `swift-bindgen`,
+`worker` (vitest), `linux` (`_build-linux.yml`: build + unit tests + .deb, uploads the
+debug `callxl-cli` and the five e2e test executables as `e2e-bins`), `windows`, `macos`
+start together; `e2e` (4 suites) and `netem` (`_netem-matrix.yml`, 6 scenarios) fan out
+from `e2e-bins` without recompiling. Test executables run from another job work because
+GitHub's checkout path is identical on every ubuntu runner (`CARGO_MANIFEST_DIR` paths to
+`scripts/netem.sh` and `infra/worker` stay valid); the netem legs sparse-check-out only
+`scripts` and `tests/e2e`. `APP_SECRET` is baked only into release packages
+(`bake_app_secret`), never into the CI test binaries uploaded as artifacts.
+
+D-0074 (2026-11-07, p2/infra-qa) — e2e samples carry `t_stats`, the time the returned
+stats were measured (`t` minus the snapshot's age from `DiagnosticsSnapshot.ts_ms`), and
+`netem_loss_backoff_recovery` attributes values to its windows by `t_stats` (thresholds
+unchanged: ≥ 30 % drop within 10 s of loss onset, ≥ 450 kbps within 30 s after it
+clears). The collector ticks at 1 Hz in its own phase, so the poll time overstated a
+value's age by up to 1 s. CI run 42352890429 failed "only dropped 510 -> 364.088": loss
+onset at 17.08 s, BWE falling from 24.1 s, target 301.9 kbps (≤ 357 = 70 %) in the sample
+polled at 27.1 s, i.e. 10.02 s after onset by poll time while its stats were taken
+before 27.1 s. The reaction itself varies: 4 s after onset in the green run 42351643296
+(510 → 201 kbps), 7 s in 42352890429. Local check (proxy backend) after the change: drop
+to 299.1 kbps at t_stats 19.7 s (onset 17.0 s), recovered 3.6 s after the loss cleared.
+If a CI run still misses the window by stats time, the next step is the product side
+(LossBasedBweV2 onset speed), not the window.
+
+D-0075 (2026-11-07, p2/infra-qa) — CI timing baseline (M0), the Phase 1 single serial
+`linux` job: warm caches (run 42351643296, phase1/core) 10 m 27 s wall-clock — clippy
+15 s, build 43 s, Swift bindgen 33 s, serial e2e 6 m 52 s, PulseAudio 21 s; cold caches
+on the new branch (run 42352890429; GitHub caches are per branch with fallback to the
+default branch, which had none) 22 m 02 s — clippy 5 m 11 s, build 4 m 17 s, bindgen
+1 m 56 s, e2e 8 m 59 s. sccache in the cold run: Rust 0 % hits, 67 cache write errors and
+a rust-cache save refused by the cache-service rate limit ("You've hit a rate limit").
+
+D-0076 (2026-11-07, p2/infra-qa) — The repository already has `CLOUDFLARE_API_TOKEN`,
+`CLOUDFLARE_ACCOUNT_ID` and `APP_SECRET`, so the M1 `workflow_dispatch` of `worker.yml`
+(run 42355101376) took the deploy path: Worker `callxl` deployed to
+`https://callxl.hbadgujar44.workers.dev` (version 559cf8b3-5154-4d0a-9df5-8ede6075b121),
+`/health` = ok, `APP_SECRET` uploaded, `TOKEN_SIGNING_KEY` generated and stored (none
+existed), no TURN secrets. The no-secrets path is proven with a dispatch input
+`simulate_missing_secrets: true`, which blanks the two secrets in the decision step only
+(same branch of the workflow as a repository without them). `DEFAULT_SIGNALING_URL` is
+left as the placeholder: changing a shipped default belongs to the orchestrator (the
+URL is `wss://callxl.hbadgujar44.workers.dev/ws`).
+
+D-0077 (2026-11-07, p2/infra-qa) — `netem_path_switch_v6_to_v4` asserts continuity
+(no gap > 20 ms, unchanged) from 1 s after the IPv6 delay step to the end of the call,
+instead of the last 14 s of a ~16 s recording (which included the step). CI run
+42355062935 failed with one 25 ms gap in bob's recording at 4.19 s = 08:26:49.7, the
+moment `tc` added 60 ms to the active IPv6 path (08:26:49.58); the switch came 5.8 s later
+(08:26:55.49, "v6->v4: rtt 120->0 ms") and left no gap; alice's recording had none. A
+sudden +60 ms one-way step starves the playout buffer for up to 60 ms whatever the
+policy (NetEq expand fades out after ~20 ms); real paths degrading is the scenario's
+injected event, and what §4 requires to be inaudible is the switch. The new window still
+contains the switch and the 6+ s after it. The same scenario passed in runs 42351643296
+and 42352890429 with the step inside the window (step landed in a quieter part of the
+test signal).
+
+D-0078 (2026-11-07, p2/infra-qa) — Correction to D-0077: why the delay step left no
+> 20 ms gap in runs 42351643296 and 42352890429 is not established (the failing gap was
+25 ms, just over the bound); the clause "step landed in a quieter part of the test
+signal" is a guess, not a finding.
+
+D-0079 (2026-11-07, p2/infra-qa) — Release mechanics. (1) The git proxy of this
+environment refuses tag pushes (HTTP 403 on `refs/tags/*`; branch pushes work), and the
+GitHub tools available here cannot create tags, so `v0.0.1-rc` cannot be pushed from the
+branch; the dry-run uses `workflow_dispatch` and `softprops/action-gh-release` creates the
+tag through the API at the dispatched commit. (2) The API answers 404 to a dispatch of a
+workflow that has never run and is not on the default branch: `release.yml` was registered
+by one commit (71fb38f) with a temporary branch-push trigger whose run skipped every job
+(run 42355852994), removed in the next commit. (3) The first dispatch (run 42355891400)
+passed every gate (meta, the three builds, all six netem legs) and failed in `release`
+because no platform package exists before the desktop/iOS branches merge (`dl/` was never
+created); `release` now tolerates that and, with `allow_partial`, publishes a Release whose
+`SHA256SUMS.txt` lists whatever exists.
+
+D-0080 (2026-11-07, p2/infra-qa) — Reusable Windows/macOS builds and the Linux package
+job copy the steps of the desktop and iOS agents' own CI jobs (branches `p2/desktop`
+93fd367, `p2/ios` 3b65790; Inno Setup defines, MSVC + static CRT, simulator pick,
+swiftformat pin, `--headless-smoke` < 1 s), each guarded by the presence of its app, so
+the merge replaces their inline jobs with calls without changing what is tested.
+`_build-linux.yml` has two jobs selected by inputs: `build` (debug, unit tests,
+`e2e-bins`, now including the debug `callxl` for `gui_join`) and `package` (fat-LTO
+release, `.deb`, install, launch < 1 s); `ci.yml` and `release.yml` call it twice so the
+LTO build never delays the e2e/netem fan-out (a caller's `needs:` waits for every job of a
+called workflow). `gui_join` runs in the `e2e loopback` leg, which already starts
+PulseAudio. `scripts/ci-webrtc-cache.sh` is taken verbatim from `p2/desktop` (same
+`webrtc.lib` check plus `cygpath`; Git Bash on windows-latest has `unzip`, so my 7-Zip
+fallback was dropped).
+
+D-0081 (2026-11-07, p2/infra-qa) — CI speed, before/after (M5). Wall-clock of `ci.yml`
+on Linux (Windows/macOS jobs still no-ops on this branch):
+warm caches 10 m 27 s (run 42351643296, one serial job) → 3 m 41 s (run 42356464865:
+lint ∥ swift-bindgen ∥ worker ∥ build 1 m 57 s, then 4 e2e suites ∥ 6 netem scenarios,
+longest leg e2e loopback 1 m 36 s); cold caches 22 m 02 s (run 42352890429) → 7 m 48 s
+(run 42355062935, every per-job cache key new). Release dry-run end to end: 3 m 57 s
+(run 42356469404). Cost: runner time grows with the fan-out, 627 → 895 runner-seconds
+warm (17 jobs, each ~30–60 s of set-up), accepted for a 2.8× shorter feedback loop.
+What made it: (1) clippy and the build no longer run back to back (cold: 5 m 11 s +
+4 m 17 s serial); (2) the e2e/netem legs reuse one debug build via the `e2e-bins`
+artifact instead of compiling (upload ~10 s at compression level 1, download ~5 s);
+(3) the 6 m 52 s serial e2e became ≤ 1 m 36 s per leg; (4) sccache warm: Rust hit rate
+100 % (lint), 87.5 % (build), 85.7 % (bindgen). `CARGO_INCREMENTAL=0`,
+`CARGO_NET_RETRY=10` everywhere. `cargo nextest` rejected: the unit tests take 1 s in
+total (run 42356464865), so there is nothing for it to win and it would add an install
+step. Caches are keyed per job kind (`lint`, `build`, `package`, `bindgen`, `windows`,
+`macos`) and on the libwebrtc tag; tag builds read the default branch's caches, so the
+release runs warm once CI has run on the integration branch after the merge. The
+libwebrtc archive is fetched once per OS and cache key (8 s cold, 0 s warm).
+
+D-0082 (2026-11-07, p2/infra-qa) — After rebasing onto the integration branch (merge
+d293752 of PR #1, which added phase1's D-0037/D-0038), this branch's entries were
+renumbered from D-0037…D-0048 to D-0070…D-0081 (cross-references inside them updated).
+D-0037…D-0049 are taken by phase1 and p2/ios, D-0050…D-0069 by p2/desktop; p2/infra-qa uses D-0070+.
+
+D-0083 (2026-11-07, p2/infra-qa) — Diagnostics export v1 also carries `app: "CallXL"`
+(additive; validated). The p2/ios test `BindingsTests.testCoreLifecycleThroughBindings`
+asserts `json["app"] == "CallXL"` and `json["diagnostics"] != nil`, i.e. the pre-v1 shape;
+with my branch and p2/ios merged it failed on exactly those lines (integration check,
+release run 42358935791, macOS job: "XCTAssertEqual failed: ("nil") is not equal to
+("Optional("CallXL")")"). `app` now passes; the second assertion must change on the iOS
+side to the v1 shape (`json["schema"] as? Int == 1`, `json["global"] != nil`, see
+docs/diagnostics-export.md). Reported to the orchestrator.
+
+D-0084 (2026-11-07, p2/infra-qa) — Integration check (throwaway branch
+`p2/infra-qa-integration-check` = this branch + `p2/desktop` + `p2/ios`, `ci.yml` resolved
+to the reusable calls): release run 42358935791 with `allow_partial: false` and tag
+`v0.0.2-rc` passed meta, linux build, linux-package (fat-LTO desktop, `.deb` stamped
+0.0.2-rc, installed, launched) and all six netem legs, then refused to publish:
+"missing release artifacts: CallXL-Setup.exe CallXL-unsigned.ipa (windows job: failure,
+macos job: failure)", the loud failure the brief requires. Windows failed in the app's own
+build set-up (MSVC under Git Bash: `/usr/bin/link` shadows `link.exe` under vcvars), which
+p2/desktop was still fixing (its own run 42357923913 also fails); macOS failed on the iOS
+test of D-0083. Neither is a workflow defect; the reusable builds follow those jobs and
+will be re-synced from the merged versions.
+
+D-0085 (2026-11-07, p2/infra-qa) — Additional baseline (D-0081 table): the integration
+branch's first `ci.yml` run after the PR #1 merge (run 42357082797, d293752, old single
+serial `linux` job, no warm cache on that branch) took 19 m 51 s; the same code on the
+fanned-out layout ran cold in 7 m 48 s and warm in 3 m 41 s (D-0081).
+
+D-0086 (2026-11-07, p2/infra-qa) — Releases are cut by `workflow_dispatch` of
+`release.yml` with `tag` (Actions UI or API) as the primary path, since tag pushes are
+refused here (D-0079): `meta` takes the tag from the input, `softprops/action-gh-release`
+creates the tag at `github.sha` (the dispatched commit) together with the Release. Proven
+by v0.0.1-rc (run 42356469404, tag created at 5834802 with no local tag). Tags created
+with the workflow's `GITHUB_TOKEN` do not trigger other workflows, so the `push: tags`
+path does not run a second time. Documented in HANDOFF.md §1.
+
+D-0087 (2026-11-07, p2/infra-qa) — `Swatinem/rust-cache` saves only on the integration
+branch and `main` (`save-if`); every other ref (feature branches, PRs, tags) restores
+from those entries through GitHub's default-branch fallback. Observation that led to it:
+run 42360575065 (518d120, after the rebase) found no rust-cache entry at all ("No cache
+found") and no libwebrtc cache on a branch that had saved both an hour earlier, its build
+took 7 m 21 s instead of 1 m 57 s (sccache Rust hits 53.9 % vs 87.5 %). Saves per entry
+are 0.1–0.5 GB (rust-cache, from the job logs) per job kind and branch, plus libwebrtc
+per OS and the sccache objects, across six active branches; GitHub evicts least recently
+used entries beyond 10 GB per repository. Eviction is the inferred cause: the cache-usage
+API is not reachable through this environment's proxy, so the usage figure itself is not
+verified. Effect is measurable only after the merge (integration-branch runs warm the
+shared entries); until then feature-branch builds rely on sccache. Rejected: dropping the
+libwebrtc cache (download is only 8 s on Linux, but the brief requires it and Windows/iOS
+archives are larger).
+
+D-0088 (2026-11-07, p2/infra-qa) — `DEFAULT_SIGNALING_URL` is now
+`wss://callxl.hbadgujar44.workers.dev/ws`, the Worker deployed by `worker.yml` (run
+42355101376, D-0076), replacing the `<account>` placeholder (orchestrator decision after
+the PR #2 review). The Settings override (`set_signaling_url`) is unchanged; HANDOFF.md §4
+says how to change the default after a redeploy under another Cloudflare account. The
+e2e peers keep running with `--no-cloud` unless a test passes a local Worker URL, so CI
+does not contact the deployed Worker.

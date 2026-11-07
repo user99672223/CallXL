@@ -311,6 +311,7 @@ async fn file_transfer_throttle_keeps_audio_loss_flat() -> Result<()> {
     );
     h.save_json("during-alice.json", &json!(during_a));
     h.save_json("during-bob.json", &json!(during_b));
+    h.save_export(&a).await;
     ensure!(limits.iter().all(|l| *l > 0.0), "throttle not active on the internet path");
     ensure!(loss_rx_b < 1.0, "audio loss averaged {loss_rx_b:.2} % during the transfer");
     ensure!(send >= 100.0, "audio send averaged {send:.1} kbps < 100");

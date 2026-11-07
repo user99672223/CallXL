@@ -1,3 +1,18 @@
+# ci — every push, pull request and manual run.
+#
+# Jobs (parallel unless noted):
+#   lint     cargo fmt --check + clippy -D warnings
+#   swift-bindgen  UniFFI Swift bindings generate from the Linux cdylib
+#   worker   Cloudflare Worker vitest suite
+#   linux    _build-linux.yml (build): debug binaries, unit tests; uploads e2e-bins
+#   linux-package  _build-linux.yml (package): desktop release build, .deb, install, < 1 s launch
+#   e2e      (needs linux) fast e2e suites, one job each, on the prebuilt binaries; the
+#            loopback suite also runs the PulseAudio null-sink (platform ADM) case and
+#            the desktop gui_join (GUI joins a CLI peer over mDNS under Xvfb)
+#   netem    (needs linux) _netem-matrix.yml: the six §11 tc-netem scenarios in parallel
+#   windows  _build-windows.yml   (CallXL-Setup.exe)
+#   macos    _build-macos.yml     (CallXLCore.xcframework, Simulator tests, CallXL-unsigned.ipa)
+# Artifacts: e2e-bins, linux-deb, windows-installer, ios-ipa, e2e-<suite>, netem-<scenario>.
 name: ci
 
 on:
@@ -10,63 +25,40 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
   RUSTC_WRAPPER: sccache
   SCCACHE_GHA_ENABLED: "true"
   CC: clang-21
   CXX: clang++-21
-  WEBRTC_TAG: webrtc-a545de4
 
 jobs:
-  linux:
+  lint:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
-      - name: System packages (clang 21 for libwebrtc's hermetic libc++, glib headers, PulseAudio)
-        run: |
-          set -euo pipefail
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
-          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list
-          sudo apt-get update -q
-          sudo apt-get install -y -q clang-21 libglib2.0-dev pkg-config pulseaudio pulseaudio-utils iproute2
-          clang++-21 --version
-
-      - name: Rust toolchain (rust-toolchain.toml)
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - uses: mozilla-actions/sccache-action@v0.0.9
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Cache prebuilt libwebrtc (${{ env.WEBRTC_TAG }})
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/callxl/${{ env.WEBRTC_TAG }}
-          key: libwebrtc-${{ env.WEBRTC_TAG }}-linux-x64-release
-
-      - name: Fetch libwebrtc (no-op when cached)
-        run: scripts/ci-webrtc-cache.sh linux-x64-release
-
       - name: cargo fmt --check
         run: cargo fmt --all --check
-
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: lint
       - name: cargo clippy -D warnings
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Build callxl-cli and test binaries
-        run: |
-          cargo build -p callxl-cli
-          cargo test --workspace --no-run
-
-      - name: Unit tests
-        run: cargo test --workspace --exclude callxl-e2e
-
+  swift-bindgen:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: bindgen
       - name: Swift bindings generate on Linux (UniFFI)
         run: |
           set -euo pipefail
@@ -78,90 +70,151 @@ jobs:
           test -s target/swift-bindings/CallXLCoreFFI.h
           test -s target/swift-bindings/CallXLCoreFFI.modulemap
 
+  worker:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra/worker
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: infra/worker/package-lock.json
-
       - name: Worker tests (vitest)
-        working-directory: infra/worker
         run: |
           npm ci
           npm test
 
-      - name: e2e (tc netem on lo, as root)
+  linux:
+    uses: ./.github/workflows/_build-linux.yml
+    with:
+      upload_artifacts: true
+      package: false
+
+  linux-package:
+    uses: ./.github/workflows/_build-linux.yml
+    with:
+      upload_artifacts: true
+      build_tests: false
+
+  e2e:
+    needs: linux
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { suite: loopback, skip: "" }
+          - { suite: signaling, skip: "" }
+          - { suite: diagnostics, skip: "" }
+          # file_transfer_throttle_keeps_audio_loss_flat is the netem file_throttle scenario.
+          - { suite: chat_files, skip: "--skip file_transfer_throttle_keeps_audio_loss_flat" }
+    name: e2e ${{ matrix.suite }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.linux.outputs.bins_artifact }}
+          path: dist/e2e-bins
+
+      - uses: actions/setup-node@v4
+        if: matrix.suite == 'signaling'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: infra/worker/package-lock.json
+
+      - name: Local Worker for signaling_roundtrip_wrangler
+        if: matrix.suite == 'signaling'
+        working-directory: infra/worker
+        run: npm ci
+
+      - name: e2e ${{ matrix.suite }} (tc netem on lo, as root)
         env:
           CALLXL_NETEM: tc
-          CALLXL_E2E_ARTIFACTS: ${{ github.workspace }}/target/e2e-artifacts
+          CALLXL_CLI: ${{ github.workspace }}/dist/e2e-bins/callxl-cli
+          CALLXL_E2E_ARTIFACTS: ${{ github.workspace }}/e2e-artifacts
+          TEST_BIN: dist/e2e-bins/${{ matrix.suite }}
+          SKIP: ${{ matrix.skip }}
         run: |
           set -euo pipefail
+          chmod +x dist/e2e-bins/*
           ip -6 addr show dev lo
           sudo ip link set lo multicast on
-          # Build as the runner user, run the test executables as root (tc needs CAP_NET_ADMIN).
-          mapfile -t BINS < <(cargo test -p callxl-e2e --no-run --message-format=json 2>/dev/null \
-            | jq -r 'select(.profile.test == true and .executable != null) | .executable')
-          export CALLXL_CLI="$PWD/target/debug/callxl-cli"
           status=0
-          for b in "${BINS[@]}"; do
-            echo "::group::$(basename "$b")"
-            sudo -E env PATH="$PATH" "$b" --test-threads=1 --nocapture || status=1
-            echo "::endgroup::"
-          done
-          sudo chown -R "$(id -u):$(id -g)" target/e2e-artifacts || true
-          exit $status
+          # shellcheck disable=SC2086
+          sudo -E env PATH="$PATH" "$TEST_BIN" $SKIP --test-threads=1 --nocapture || status=$?
+          sudo chown -R "$(id -u):$(id -g)" e2e-artifacts || true
+          exit "$status"
 
       - name: PulseAudio null sink exercised once (platform ADM)
+        if: matrix.suite == 'loopback'
         env:
           CALLXL_E2E_ADM: platform
-          CALLXL_E2E_ARTIFACTS: ${{ github.workspace }}/target/e2e-artifacts-pulse
+          CALLXL_CLI: ${{ github.workspace }}/dist/e2e-bins/callxl-cli
+          CALLXL_E2E_ARTIFACTS: ${{ github.workspace }}/e2e-artifacts-pulse
         run: |
           set -euo pipefail
+          sudo apt-get install -y -q --no-install-recommends pulseaudio pulseaudio-utils >/dev/null
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=callxl_null
           pactl set-default-sink callxl_null
           pactl set-default-source callxl_null.monitor
           # Speech into the null sink so the platform capture (its monitor) is not silence:
           # with silence VBR Opus sends ~2 kbps and BWE has nothing to grow on (run 42337000540).
-          wav="$(ls target/e2e-artifacts/assets/*.wav | head -1)"
+          wav="$(find e2e-artifacts/assets -name '*.wav' | head -1)"
           ( while true; do paplay -d callxl_null "$wav" || break; done ) &
           player=$!
-          cargo test -p callxl-e2e --test loopback -- loopback_v4_lan_policy --nocapture
+          dist/e2e-bins/loopback loopback_v4_lan_policy --exact --nocapture
           kill "$player" || true
 
-      - name: Upload callxl-cli
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: callxl-cli
-          path: target/debug/callxl-cli
-          if-no-files-found: warn
+      - name: Desktop gui_join (GUI joins a callxl-cli peer over real mDNS, under Xvfb)
+        if: matrix.suite == 'loopback' && hashFiles('apps/desktop/tests/gui_join.sh') != ''
+        env:
+          CALLXL_GUI_JOIN_AUDIO: "1"
+          CALLXL_E2E_ARTIFACTS: ${{ github.workspace }}/e2e-artifacts-gui
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -q --no-install-recommends xvfb xauth libxkbcommon-x11-0 libxkbcommon0 libgl1 libegl1 \
+            libgl1-mesa-dri libfontconfig1 libxcursor1 libxi6 libxrandr2 libwayland-client0 libwayland-egl1 libwayland-cursor0 bc >/dev/null
+          # PulseAudio (started above) gives the GUI's platform audio device a null sink;
+          # speech into it so the GUI sends real audio back to the CLI peer.
+          wav="$(find e2e-artifacts/assets -name '*.wav' | head -1)"
+          ( while true; do paplay -d callxl_null "$wav" || break; done ) &
+          player=$!
+          apps/desktop/tests/gui_join.sh dist/e2e-bins/callxl dist/e2e-bins/callxl-cli
+          kill "$player" || true
 
-      - name: Upload e2e logs, recordings, diagnostics
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: e2e-logs
+          name: e2e-${{ matrix.suite }}
           path: |
-            target/e2e-artifacts
-            target/e2e-artifacts-pulse
-            !target/**/assets
+            e2e-artifacts
+            e2e-artifacts-pulse
+            e2e-artifacts-gui
+            !**/assets
+          retention-days: 14
           if-no-files-found: warn
 
-  # ---------------------------------------------------------------------------
-  # Phase 2 adds these jobs (placeholders, intentionally commented out):
-  #
-  # windows:
-  #   runs-on: windows-latest
-  #   steps: checkout · clang/MSVC toolchain · libwebrtc cache (win-x64-release) ·
-  #          cargo build (static CRT) · cargo test --workspace --exclude callxl-e2e ·
-  #          loopback e2e with the test ADM · Inno Setup → CallXL-Setup.exe ·
-  #          silent install/uninstall smoke test · upload CallXL-Setup.exe
-  #
-  # macos:
-  #   runs-on: macos-latest
-  #   steps: checkout · libwebrtc caches (ios-device-arm64, ios-simulator-arm64) ·
-  #          cargo rustc --crate-type staticlib per target → CallXLCore.xcframework ·
-  #          uniffi-bindgen swift · xcodebuild test (iOS Simulator) · unsigned .ipa ·
-  #          upload CallXL-unsigned.ipa
-  # ---------------------------------------------------------------------------
+  netem:
+    needs: linux
+    uses: ./.github/workflows/_netem-matrix.yml
+    with:
+      ref: ${{ github.sha }}
+      bins_artifact: ${{ needs.linux.outputs.bins_artifact }}
+
+  windows:
+    uses: ./.github/workflows/_build-windows.yml
+    with:
+      upload_artifacts: true
+
+  macos:
+    uses: ./.github/workflows/_build-macos.yml
+    with:
+      upload_artifacts: true

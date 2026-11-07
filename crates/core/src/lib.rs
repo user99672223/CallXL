@@ -7,6 +7,7 @@ pub mod api;
 mod chat;
 pub mod config;
 mod diag;
+pub mod diagnostics;
 mod engine;
 mod files;
 mod identity;

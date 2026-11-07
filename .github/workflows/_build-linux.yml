@@ -1,0 +1,200 @@
+# _build-linux — reusable Linux build on ubuntu-22.04 (glibc compatibility, CLAUDE.md §8).
+#
+# Called by: ci.yml and release.yml, typically twice in parallel:
+#   build_tests: true   job `build`   — debug callxl-cli (+ callxl desktop) and the e2e test
+#                                       executables, unit tests; uploads `e2e-bins`, which
+#                                       the e2e and netem jobs run without recompiling.
+#   package: true       job `package` — desktop release build (fat LTO), `cargo deb`,
+#                                       install of the .deb, launch < 1 s under Xvfb
+#                                       (§14); uploads `linux-deb` (callxl_<ver>_amd64.deb).
+# Lint (fmt/clippy) and the UniFFI Swift bindgen check are separate ci.yml jobs.
+# Desktop steps are skipped while apps/desktop does not exist.
+name: _build-linux
+
+on:
+  workflow_call:
+    inputs:
+      upload_artifacts:
+        description: upload e2e-bins / linux-deb
+        type: boolean
+        default: true
+      build_tests:
+        description: run job `build` (debug binaries, unit tests, e2e-bins)
+        type: boolean
+        default: true
+      package:
+        description: run job `package` (release build, .deb, install + startup smoke)
+        type: boolean
+        default: true
+      version_tag:
+        description: release tag (e.g. v0.1.0); prerelease tags stamp their version (scripts/check-version.sh)
+        type: string
+        default: ""
+      bake_app_secret:
+        description: build the .deb with the APP_SECRET repository secret (release builds only)
+        type: boolean
+        default: false
+    secrets:
+      APP_SECRET:
+        required: false
+    outputs:
+      bins_artifact:
+        description: name of the e2e binaries artifact
+        value: ${{ jobs.build.outputs.bins_artifact }}
+      deb_artifact:
+        description: name of the .deb artifact ("" when the desktop app does not exist yet)
+        value: ${{ jobs.package.outputs.deb_artifact }}
+      deb_file:
+        description: file name of the .deb
+        value: ${{ jobs.package.outputs.deb_file }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  CC: clang-21
+  CXX: clang++-21
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: inputs.build_tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    outputs:
+      bins_artifact: ${{ steps.bins.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version check (release builds)
+        if: inputs.version_tag != ''
+        env:
+          TAG: ${{ inputs.version_tag }}
+        run: |
+          if [[ "$TAG" == *-* ]]; then scripts/check-version.sh --stamp "$TAG"; else scripts/check-version.sh "$TAG"; fi
+
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: build
+
+      - name: Build callxl-cli (+ callxl desktop) and test binaries
+        run: |
+          set -euo pipefail
+          pkgs=(-p callxl-cli)
+          if [[ -f apps/desktop/Cargo.toml ]]; then pkgs+=(-p callxl-desktop); fi
+          cargo build "${pkgs[@]}"
+          cargo test --workspace --no-run
+
+      - name: Unit tests
+        run: cargo test --workspace --exclude callxl-e2e
+
+      - name: Collect e2e binaries (stable names)
+        id: bins
+        run: |
+          set -euo pipefail
+          mkdir -p dist/e2e-bins
+          cp target/debug/callxl-cli dist/e2e-bins/
+          if [[ -f target/debug/callxl ]]; then cp target/debug/callxl dist/e2e-bins/; fi
+          cargo test -p callxl-e2e --no-run --message-format=json 2>/dev/null \
+            | jq -r 'select(.profile.test == true and .executable != null and .target.kind == ["test"]) | "\(.executable) \(.target.name)"' \
+            | while read -r exe name; do cp "$exe" "dist/e2e-bins/$name"; done
+          ls -l dist/e2e-bins
+          echo "name=e2e-bins" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.upload_artifacts
+        with:
+          name: e2e-bins
+          path: dist/e2e-bins
+          retention-days: 7
+          compression-level: 1
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always() && hashFiles('apps/desktop/Cargo.toml') != ''
+        with:
+          name: desktop-screens
+          path: target/screens
+          if-no-files-found: ignore
+
+  # Desktop .deb (apps/desktop, packaging/linux are the desktop app's; this only drives them).
+  package:
+    if: inputs.package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    outputs:
+      deb_artifact: ${{ steps.deb.outputs.name }}
+      deb_file: ${{ steps.deb.outputs.file }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Desktop app present?
+        id: present
+        run: |
+          if [[ -f apps/desktop/Cargo.toml ]]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::notice::apps/desktop not present yet: no .deb"; fi
+
+      - name: Version check (release builds)
+        if: steps.present.outputs.ok == 'true' && inputs.version_tag != ''
+        env:
+          TAG: ${{ inputs.version_tag }}
+        run: |
+          if [[ "$TAG" == *-* ]]; then scripts/check-version.sh --stamp "$TAG"; else scripts/check-version.sh "$TAG"; fi
+
+      - uses: ./.github/actions/setup-linux
+        if: steps.present.outputs.ok == 'true'
+        with:
+          cache-key: package
+          extra-packages: >-
+            xvfb xauth libxkbcommon-x11-0 libxkbcommon0 libgl1 libegl1 libgl1-mesa-dri libfontconfig1
+            libxcursor1 libxi6 libxrandr2 libwayland-client0 libwayland-egl1 libwayland-cursor0 bc
+
+      - uses: taiki-e/install-action@v2
+        if: steps.present.outputs.ok == 'true'
+        with:
+          tool: cargo-deb
+
+      - name: Desktop release build (fat LTO), .deb, install, startup under 1 s
+        id: deb
+        if: steps.present.outputs.ok == 'true'
+        env:
+          CALLXL_APP_SECRET: ${{ inputs.bake_app_secret && secrets.APP_SECRET || '' }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CALLXL_APP_SECRET" ]]; then unset CALLXL_APP_SECRET; fi
+          t0=$(date +%s)
+          cargo build --release -p callxl-desktop
+          echo "release build: $(( $(date +%s) - t0 )) s"
+          cargo deb -p callxl-desktop --no-build
+          deb="$(find target/debian -maxdepth 1 -name 'callxl_*_amd64.deb' | head -1)"
+          test -n "$deb"
+          echo "binary: $(stat -c %s target/release/callxl) bytes; package: $(stat -c %s "$deb") bytes ($deb)"
+          dpkg -I "$deb"
+          dpkg -c "$deb"
+          sudo apt-get install -y -q "./$deb"
+          dpkg -s callxl | grep -E '^(Version|Depends):'
+          test -x /usr/bin/callxl
+          callxl --version
+          # §14: launches under 1 s (measured by the app from process start to window
+          # shown + core started). Three launches: cold, then warm.
+          for _ in 1 2 3; do
+            out="$(xvfb-run -a callxl --headless-smoke 2>/dev/null)"
+            echo "$out"
+            ms="$(echo "$out" | sed -n 's/^startup_ms=//p')"
+            echo "$out" | grep -qx ready
+            test -n "$ms" && test "$ms" -lt 1000
+          done
+          mkdir -p dist/deb && cp "$deb" dist/deb/
+          echo "name=linux-deb" >> "$GITHUB_OUTPUT"
+          echo "file=$(basename "$deb")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.upload_artifacts && steps.deb.outputs.name != ''
+        with:
+          name: linux-deb
+          path: dist/deb/*.deb
+          if-no-files-found: error

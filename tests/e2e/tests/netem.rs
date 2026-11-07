@@ -73,6 +73,7 @@ async fn finish(h: &Harness, a: Peer, b: Peer, samples: &[Value], tail: f64) -> 
     h.save_json("alice-samples.json", &json!(samples));
     h.save_json("alice-diagnostics.json", &a.diagnostics().await?);
     h.save_json("bob-diagnostics.json", &b.diagnostics().await?);
+    h.save_export(&a).await;
     let ra = a.stop().await?;
     let rb = b.stop().await?;
     assert_continuous_tail(&rb, tail)?;
@@ -135,13 +136,16 @@ async fn netem_loss_backoff_recovery() -> Result<()> {
     netem.set(Family::All, Impairment { delay_ms: 20, ..Impairment::CLEAN })?;
     s.extend(sample(&a, t0, 31.0).await?);
     h.save_json("alice-samples.json", &json!(s));
+    // Attributed by when each value was measured (`t_stats`), not when it was polled.
     let dropped = s
         .iter()
-        .filter(|p| f(p, "t") > loss_on && f(p, "t") <= loss_on + 10.0)
+        .filter(|p| f(p, "t_stats") > loss_on && f(p, "t_stats") <= loss_on + 10.0)
         .map(|p| f(p, "opus_bitrate_kbps"))
         .fold(f64::INFINITY, f64::min);
-    let recovered =
-        s.iter().find(|p| f(p, "t") > loss_off && f(p, "opus_bitrate_kbps") >= 450.0).map(|p| f(p, "t") - loss_off);
+    let recovered = s
+        .iter()
+        .find(|p| f(p, "t_stats") > loss_off && f(p, "opus_bitrate_kbps") >= 450.0)
+        .map(|p| f(p, "t_stats") - loss_off);
     eprintln!("before {before} kbps, min within 10 s of loss {dropped} kbps, recovered after {recovered:?} s");
     ensure!(dropped <= before * 0.7, "target only dropped {before} -> {dropped} kbps under 5 % loss");
     ensure!(recovered.is_some_and(|t| t <= 30.0), "did not recover to 450 kbps within 30 s");
@@ -215,7 +219,13 @@ async fn netem_path_switch_v6_to_v4() -> Result<()> {
     ensure!(switched.is_some_and(|t| t <= 10.0), "no switch to IPv4 within 10 s");
     ensure!(last["pair_switches"] == 1, "expected exactly one switch, got {}", last["pair_switches"]);
     netem.clear()?;
-    finish(&h, a, b, &s, 14.0).await
+    // Continuity is asserted from 1 s after the delay step to the end: that span holds the
+    // switch (≈ 7 s after the step) and everything after it. The step itself (0 → 60 ms
+    // one-way on the active path) starves any jitter buffer for up to 60 ms; that is the
+    // injected network event, not the switch (CI run 42355062935: 25 ms gap exactly at the
+    // step, 5.8 s before the switch; none at the switch). See DECISIONS.md.
+    let tail = (Instant::now() - t0).as_secs_f64() - degrade - 1.0;
+    finish(&h, a, b, &s, tail).await
 }
 
 /// Mirror case: IPv6 is degraded from the start (call moves to IPv4), then IPv6 clears;
