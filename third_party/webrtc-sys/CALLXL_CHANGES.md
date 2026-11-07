@@ -41,3 +41,9 @@ taken, so the CallXL factory is `create_callxl_peer_connection_factory`.
 applies the requested APM config directly (`callxl_apply_apm`): the voice engine
 re-applies the source options on every send-stream reconfiguration (each renegotiation)
 and otherwise resets the live APM config (DECISIONS.md D-0024).
+
+## iOS (p2/ios)
+
+`src/callxl_test_adm.cpp`: Apple has no `clock_nanosleep`; on `__APPLE__` the test ADM's
+10 ms loop sleeps (`std::this_thread::sleep_for`) for the time left until the same
+absolute `CLOCK_MONOTONIC` deadline. The Linux path is unchanged.

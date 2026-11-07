@@ -13,6 +13,7 @@
 #include <time.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -235,9 +236,16 @@ class TestAudioDevice : public webrtc::AudioDeviceModule {
     size_t play_pos = 0;
     while (running_.load(std::memory_order_relaxed)) {
       next += 10000;
+#if defined(__APPLE__)
+      // No clock_nanosleep on Apple: sleep for what is left until the same absolute
+      // deadline (NowUs' clock), so the 10 ms cadence still does not drift.
+      const int64_t wait = next - NowUs();
+      if (wait > 0) std::this_thread::sleep_for(std::chrono::microseconds(wait));
+#else
       timespec ts{static_cast<time_t>(next / 1000000),
                   static_cast<long>((next % 1000000) * 1000)};
       clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr);
+#endif
       const int64_t late = NowUs() - next;
       if (late > max_late_us_.load(std::memory_order_relaxed))
         max_late_us_.store(late, std::memory_order_relaxed);

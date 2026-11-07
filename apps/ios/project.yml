@@ -1,0 +1,122 @@
+# XcodeGen spec for the CallXL iOS app (CI: `xcodegen generate` in apps/ios).
+# The Rust core comes in as ../../target/ios/CallXLCore.xcframework and its Swift binding
+# as CallXL/Generated/CallXLCore.swift, both made by packaging/ios/build-xcframework.sh.
+name: CallXL
+options:
+  bundleIdPrefix: com.callxl
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    # The core has no x86_64 simulator slice (DECISIONS.md D-0038).
+    EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+  configs:
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: wholemodule
+      DEAD_CODE_STRIPPING: "YES"
+      STRIP_INSTALLED_PRODUCT: "YES"
+      DEBUG_INFORMATION_FORMAT: dwarf
+targets:
+  CallXL:
+    type: application
+    platform: iOS
+    sources:
+      - path: CallXL
+      - path: ../../design/fonts/Inter-Regular.ttf
+        group: CallXL/Resources
+        buildPhase: resources
+      - path: ../../design/fonts/Inter-SemiBold.ttf
+        group: CallXL/Resources
+        buildPhase: resources
+    dependencies:
+      - framework: ../../target/ios/CallXLCore.xcframework
+        embed: true
+        codeSign: true
+      - sdk: CallKit.framework
+      - sdk: AVFoundation.framework
+      - sdk: AVKit.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.callxl.app
+        PRODUCT_NAME: CallXL
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: "NO"
+        INFOPLIST_FILE: CallXL/Info.plist
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+        CODE_SIGN_STYLE: Automatic
+    info:
+      path: CallXL/Info.plist
+      properties:
+        CFBundleDisplayName: CallXL
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - audio
+        NSMicrophoneUsageDescription: CallXL needs the microphone so the people in your call can hear you.
+        NSLocalNetworkUsageDescription: CallXL finds and calls devices on your Wi-Fi directly, without any server.
+        NSBonjourServices:
+          - _callxl._tcp
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UIAppFonts:
+          - Inter-Regular.ttf
+          - Inter-SemiBold.ttf
+        ITSAppUsesNonExemptEncryption: false
+  CallXLTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: CallXLTests
+    dependencies:
+      - target: CallXL
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.callxl.app.tests
+        GENERATE_INFOPLIST_FILE: "YES"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/CallXL.app/CallXL"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  CallXLUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: CallXLUITests
+    dependencies:
+      - target: CallXL
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.callxl.app.uitests
+        GENERATE_INFOPLIST_FILE: "YES"
+        TEST_TARGET_NAME: CallXL
+schemes:
+  CallXL:
+    build:
+      targets:
+        CallXL: all
+        CallXLTests: [test]
+        CallXLUITests: [test]
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - CallXLTests
+        - CallXLUITests
+    archive:
+      config: Release

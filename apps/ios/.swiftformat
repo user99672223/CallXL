@@ -1,0 +1,5 @@
+--swiftversion 5.10
+--exclude CallXL/Generated,CallXL/Theme/Tokens.swift
+--maxwidth 160
+--wraparguments before-first
+--disable wrapMultilineStatementBraces
