@@ -27,12 +27,13 @@ enum CallAudio {
 /// are looked up by name instead of linked. This gives the CallKit integration WebRTC
 /// expects: manual audio, enabled only while CallKit has activated the session.
 enum WebRTCAudioBridge {
-    static var sessionClass: NSObject.Type? {
-        NSClassFromString("RTCAudioSession") as? NSObject.Type
+    /// Class objects as `AnyObject`, so class methods are sent like instance methods.
+    static var sessionClass: AnyObject? {
+        NSClassFromString("RTCAudioSession").map { $0 as AnyObject }
     }
 
-    static var configurationClass: NSObject.Type? {
-        NSClassFromString("RTCAudioSessionConfiguration") as? NSObject.Type
+    static var configurationClass: AnyObject? {
+        NSClassFromString("RTCAudioSessionConfiguration").map { $0 as AnyObject }
     }
 
     static var shared: NSObject? {

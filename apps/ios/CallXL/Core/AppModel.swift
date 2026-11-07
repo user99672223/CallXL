@@ -50,6 +50,7 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private var starting = false
     private var userMuted = false
     private var held = false
     private var refreshTimer: Timer?
@@ -81,6 +82,8 @@ final class AppModel: ObservableObject {
 
     /// Starts the core off the main actor; Home is already on screen meanwhile.
     func start() {
+        guard !starting else { return }
+        starting = true
         let core = core
         Task.detached(priority: .userInitiated) {
             do {
