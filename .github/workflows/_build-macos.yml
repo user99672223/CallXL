@@ -4,7 +4,8 @@
 # Produces:  artifact `ios-ipa` with CallXL-unsigned.ipa and artifact
 #            `CallXLCore.xcframework` (zip), after the Bonjour backend tests,
 #            `xcodebuild test` on an iOS Simulator and `swiftformat --lint`.
-#            Scripts: packaging/ios/build-xcframework.sh, packaging/ios/build-unsigned-ipa.sh.
+#            Scripts: packaging/ios/build-xcframework.sh, packaging/ios/build-unsigned-ipa.sh,
+#            packaging/ios/measure-launch.sh (launch to Home < 1 s, §1.5).
 # The steps follow the iOS app's own macOS job; until apps/ios and those scripts exist the
 # job only reports that and outputs no artifact.
 name: _build-macos
@@ -143,18 +144,29 @@ jobs:
           echo "simulator: $UDID"
           UDID="${UDID%% *}"
           xcrun simctl boot "$UDID" || true
-          # Live, filtered progress; the full log is uploaded as an artifact.
-          xcodebuild test \
-            -project apps/ios/CallXL.xcodeproj -scheme CallXL \
-            -destination "platform=iOS Simulator,id=$UDID" \
-            -derivedDataPath target/ios/DerivedData-test \
-            -resultBundlePath target/ios/CallXLTests.xcresult \
-            -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 120 \
-            -maximum-test-execution-time-allowance 300 \
-            CODE_SIGNING_ALLOWED=NO 2>&1 \
-            | tee target/ios/xcodebuild-test.log \
-            | grep --line-buffered -E "Test Case|Test Suite|error:|launch-to-home|bindings:|bonjour|Executed|failed|BUILD|Testing started|\*\*"
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+          # Live, filtered progress; full logs are uploaded as an artifact.
+          # CallXL = unit tests (Debug, @testable); CallXLUI = UI smoke on the Release build.
+          for scheme in CallXL CallXLUI; do
+            echo "::group::xcodebuild test -scheme $scheme"
+            xcodebuild test \
+              -project apps/ios/CallXL.xcodeproj -scheme "$scheme" \
+              -destination "platform=iOS Simulator,id=$UDID" \
+              -derivedDataPath target/ios/DerivedData-test \
+              -resultBundlePath "target/ios/$scheme.xcresult" \
+              -test-timeouts-enabled YES \
+              -default-test-execution-time-allowance 120 \
+              -maximum-test-execution-time-allowance 300 \
+              CODE_SIGNING_ALLOWED=NO 2>&1 \
+              | tee "target/ios/xcodebuild-test-$scheme.log" \
+              | grep --line-buffered -E "Test Case|Test Suite|error:|launch-to-home|launch phases|core: created|bindings:|bonjour|Executed|failed|BUILD|\*\*"
+            echo "::endgroup::"
+          done
+
+      - name: Launch to Home < 1 s (Release build, simctl launch, real core)
+        if: steps.present.outputs.ok == 'true'
+        timeout-minutes: 10
+        run: packaging/ios/measure-launch.sh "$SIM_UDID" target/ios/DerivedData-test/Build/Products/Release-iphonesimulator/CallXL.app
 
       - name: Unsigned IPA
         id: ipa
@@ -186,6 +198,6 @@ jobs:
         with:
           name: ios-test-results
           path: |
-            target/ios/CallXLTests.xcresult
-            target/ios/xcodebuild-test.log
+            target/ios/*.xcresult
+            target/ios/xcodebuild-test-*.log
           if-no-files-found: ignore

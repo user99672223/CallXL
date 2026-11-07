@@ -87,25 +87,20 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(newSession.waitForExistence(timeout: 5))
     }
 
-    /// Real core. The first launch after install includes the simulator's one-time dyld
-    /// work for the new framework, so the warm (second) launch is the measured one;
-    /// both are printed.
-    func testLaunchToHomeUnderOneSecond() throws {
-        var results: [Double] = []
-        for _ in 0 ..< 2 {
+    /// Real core, launched by XCUITest. XCUITest's own launch procedure is included in the
+    /// process-start clock (about 1.5 s on the CI runner, before any app code runs), so this
+    /// test reports the phases; the §1.5 limit is asserted on a plain `simctl launch` of the
+    /// same Release build in CI (packaging/ios/measure-launch.sh).
+    func testLaunchReachesHome() {
+        for run in ["cold", "warm"] {
             let app = XCUIApplication()
             app.launchArguments = ["-uiTestReportLaunch"]
             app.launch()
             let label = element(app, "home.launchMs")
             XCTAssertTrue(label.waitForExistence(timeout: 10))
-            let text = label.label.isEmpty ? (label.value as? String ?? "") : label.label
-            let ms = try XCTUnwrap(Double(text), "launch label \(text)")
-            results.append(ms)
-            print("launch phases: \(element(app, "home.launchBreakdown").label)")
             XCTAssertTrue(app.buttons["home.newSession"].exists)
+            print("launch-to-home-ms (XCUITest, \(run)): \(label.label); launch phases: \(element(app, "home.launchBreakdown").label)")
             app.terminate()
         }
-        print("launch-to-home-ms cold=\(results[0]) warm=\(results[1])")
-        XCTAssertLessThan(results[1], 1000, "launch to Home took \(results[1]) ms")
     }
 }
