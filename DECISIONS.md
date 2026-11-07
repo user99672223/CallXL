@@ -345,7 +345,7 @@ due time; a timer firing ≥ 2 ms early ended the chain and the switching policy
 for the rest of the call (no evaluation at all on either side of
 `netem_path_switch_v4_to_v6`, which therefore never returned to IPv6). Any recheck in the
 second half of the pending window now counts.
-D-0037 (2026-11-07, p2/infra-qa) — `worker.yml`: every run (any branch touching
+D-0070 (2026-11-07, p2/infra-qa) — `worker.yml`: every run (any branch touching
 `infra/worker/**`) runs the vitest suite and `wrangler deploy --dry-run` (bundles and
 validates bindings without credentials); it deploys only on the integration branch, `main`
 or a manual dispatch, and only when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
@@ -358,7 +358,7 @@ CI never rotates it (rotation would invalidate all live 1-hour tokens), and a fa
 re-put on each deploy (`wrangler secret put` overwrites idempotently). Optional
 `TURN_KEY_ID`/`TURN_API_TOKEN` repository secrets are forwarded when present.
 
-D-0038 (2026-11-07, p2/infra-qa) — Diagnostics export schema v1
+D-0071 (2026-11-07, p2/infra-qa) — Diagnostics export schema v1
 (`docs/diagnostics-export.md`): top-level `{schema, app_version, platform, ts, call,
 peers, global, series, log_tail}`, `series` as an object metric → ≤ 60 numbers, ≤ 1000 log
 lines. Writers may only add keys within v1; anything else bumps `schema`. Redaction:
@@ -375,7 +375,7 @@ on a real recorded snapshot (fixture captured from `diagnostics_complete`, proxy
 and `diagnostics_complete` validating the live export (local: "export: schema v1 valid,
 6343 bytes, 16 series, 4 log lines").
 
-D-0039 (2026-11-07, p2/infra-qa) — Release versions: `scripts/check-version.sh` compares
+D-0072 (2026-11-07, p2/infra-qa) — Release versions: `scripts/check-version.sh` compares
 the tag (without `v`) to `apps/desktop/Cargo.toml` (or the workspace version it
 inherits). A final tag `vX.Y.Z` must match exactly and fails early otherwise. A
 prerelease tag `vX.Y.Z-<pre>` (e.g. the `v0.0.1-rc` dry-run while the code says 0.1.0)
@@ -385,7 +385,7 @@ then checks, so every artifact and `CARGO_PKG_VERSION` carry the prerelease vers
 prereleases Debian-style, `0.0.1~rc`, inside the package; GitHub would mangle `~` in an
 asset name). Prerelease = tag contains `-`.
 
-D-0040 (2026-11-07, p2/infra-qa) — CI job graph: `lint` (fmt + clippy), `swift-bindgen`,
+D-0073 (2026-11-07, p2/infra-qa) — CI job graph: `lint` (fmt + clippy), `swift-bindgen`,
 `worker` (vitest), `linux` (`_build-linux.yml`: build + unit tests + .deb, uploads the
 debug `callxl-cli` and the five e2e test executables as `e2e-bins`), `windows`, `macos`
 start together; `e2e` (4 suites) and `netem` (`_netem-matrix.yml`, 6 scenarios) fan out
@@ -395,7 +395,7 @@ GitHub's checkout path is identical on every ubuntu runner (`CARGO_MANIFEST_DIR`
 `scripts` and `tests/e2e`. `APP_SECRET` is baked only into release packages
 (`bake_app_secret`), never into the CI test binaries uploaded as artifacts.
 
-D-0041 (2026-11-07, p2/infra-qa) — e2e samples carry `t_stats`, the time the returned
+D-0074 (2026-11-07, p2/infra-qa) — e2e samples carry `t_stats`, the time the returned
 stats were measured (`t` minus the snapshot's age from `DiagnosticsSnapshot.ts_ms`), and
 `netem_loss_backoff_recovery` attributes values to its windows by `t_stats` (thresholds
 unchanged: ≥ 30 % drop within 10 s of loss onset, ≥ 450 kbps within 30 s after it
@@ -409,7 +409,7 @@ to 299.1 kbps at t_stats 19.7 s (onset 17.0 s), recovered 3.6 s after the loss c
 If a CI run still misses the window by stats time, the next step is the product side
 (LossBasedBweV2 onset speed), not the window.
 
-D-0042 (2026-11-07, p2/infra-qa) — CI timing baseline (M0), the Phase 1 single serial
+D-0075 (2026-11-07, p2/infra-qa) — CI timing baseline (M0), the Phase 1 single serial
 `linux` job: warm caches (run 42351643296, phase1/core) 10 m 27 s wall-clock — clippy
 15 s, build 43 s, Swift bindgen 33 s, serial e2e 6 m 52 s, PulseAudio 21 s; cold caches
 on the new branch (run 42352890429; GitHub caches are per branch with fallback to the
@@ -417,7 +417,7 @@ default branch, which had none) 22 m 02 s — clippy 5 m 11 s, build 4 m 17 s, b
 1 m 56 s, e2e 8 m 59 s. sccache in the cold run: Rust 0 % hits, 67 cache write errors and
 a rust-cache save refused by the cache-service rate limit ("You've hit a rate limit").
 
-D-0043 (2026-11-07, p2/infra-qa) — The repository already has `CLOUDFLARE_API_TOKEN`,
+D-0076 (2026-11-07, p2/infra-qa) — The repository already has `CLOUDFLARE_API_TOKEN`,
 `CLOUDFLARE_ACCOUNT_ID` and `APP_SECRET`, so the M1 `workflow_dispatch` of `worker.yml`
 (run 42355101376) took the deploy path: Worker `callxl` deployed to
 `https://callxl.hbadgujar44.workers.dev` (version 559cf8b3-5154-4d0a-9df5-8ede6075b121),
@@ -428,7 +428,7 @@ existed), no TURN secrets. The no-secrets path is proven with a dispatch input
 left as the placeholder: changing a shipped default belongs to the orchestrator (the
 URL is `wss://callxl.hbadgujar44.workers.dev/ws`).
 
-D-0044 (2026-11-07, p2/infra-qa) — `netem_path_switch_v6_to_v4` asserts continuity
+D-0077 (2026-11-07, p2/infra-qa) — `netem_path_switch_v6_to_v4` asserts continuity
 (no gap > 20 ms, unchanged) from 1 s after the IPv6 delay step to the end of the call,
 instead of the last 14 s of a ~16 s recording (which included the step). CI run
 42355062935 failed with one 25 ms gap in bob's recording at 4.19 s = 08:26:49.7, the
@@ -441,12 +441,12 @@ contains the switch and the 6+ s after it. The same scenario passed in runs 4235
 and 42352890429 with the step inside the window (step landed in a quieter part of the
 test signal).
 
-D-0045 (2026-11-07, p2/infra-qa) — Correction to D-0044: why the delay step left no
+D-0078 (2026-11-07, p2/infra-qa) — Correction to D-0077: why the delay step left no
 > 20 ms gap in runs 42351643296 and 42352890429 is not established (the failing gap was
 25 ms, just over the bound); the clause "step landed in a quieter part of the test
 signal" is a guess, not a finding.
 
-D-0046 (2026-11-07, p2/infra-qa) — Release mechanics. (1) The git proxy of this
+D-0079 (2026-11-07, p2/infra-qa) — Release mechanics. (1) The git proxy of this
 environment refuses tag pushes (HTTP 403 on `refs/tags/*`; branch pushes work), and the
 GitHub tools available here cannot create tags, so `v0.0.1-rc` cannot be pushed from the
 branch; the dry-run uses `workflow_dispatch` and `softprops/action-gh-release` creates the
@@ -459,7 +459,7 @@ because no platform package exists before the desktop/iOS branches merge (`dl/` 
 created); `release` now tolerates that and, with `allow_partial`, publishes a Release whose
 `SHA256SUMS.txt` lists whatever exists.
 
-D-0047 (2026-11-07, p2/infra-qa) — Reusable Windows/macOS builds and the Linux package
+D-0080 (2026-11-07, p2/infra-qa) — Reusable Windows/macOS builds and the Linux package
 job copy the steps of the desktop and iOS agents' own CI jobs (branches `p2/desktop`
 93fd367, `p2/ios` 3b65790; Inno Setup defines, MSVC + static CRT, simulator pick,
 swiftformat pin, `--headless-smoke` < 1 s), each guarded by the presence of its app, so
@@ -473,7 +473,7 @@ PulseAudio. `scripts/ci-webrtc-cache.sh` is taken verbatim from `p2/desktop` (sa
 `webrtc.lib` check plus `cygpath`; Git Bash on windows-latest has `unzip`, so my 7-Zip
 fallback was dropped).
 
-D-0048 (2026-11-07, p2/infra-qa) — CI speed, before/after (M5). Wall-clock of `ci.yml`
+D-0081 (2026-11-07, p2/infra-qa) — CI speed, before/after (M5). Wall-clock of `ci.yml`
 on Linux (Windows/macOS jobs still no-ops on this branch):
 warm caches 10 m 27 s (run 42351643296, one serial job) → 3 m 41 s (run 42356464865:
 lint ∥ swift-bindgen ∥ worker ∥ build 1 m 57 s, then 4 e2e suites ∥ 6 netem scenarios,
@@ -492,3 +492,8 @@ step. Caches are keyed per job kind (`lint`, `build`, `package`, `bindgen`, `win
 `macos`) and on the libwebrtc tag; tag builds read the default branch's caches, so the
 release runs warm once CI has run on the integration branch after the merge. The
 libwebrtc archive is fetched once per OS and cache key (8 s cold, 0 s warm).
+
+D-0082 (2026-11-07, p2/infra-qa) — After rebasing onto the integration branch (merge
+d293752 of PR #1, which added phase1's D-0037/D-0038), this branch's entries were
+renumbered from D-0037…D-0048 to D-0070…D-0081 (cross-references inside them updated).
+D-0037…D-0049 are taken by phase1 and p2/ios, D-0050…D-0069 by p2/desktop; p2/infra-qa uses D-0070+.
