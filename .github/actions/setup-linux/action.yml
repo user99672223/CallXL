@@ -37,6 +37,9 @@ runs:
       with:
         key: ${{ inputs.cache-key }}
         cache-on-failure: true
+        # Saved only from the integration branch / main (D-0087): every other ref restores
+        # those entries, so branches do not evict each other within the 10 GB repo limit.
+        save-if: ${{ github.ref == 'refs/heads/claude/new-session-opnv54' || github.ref == 'refs/heads/main' }}
 
     - name: Cache prebuilt libwebrtc
       uses: actions/cache@v4

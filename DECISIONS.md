@@ -531,3 +531,18 @@ creates the tag at `github.sha` (the dispatched commit) together with the Releas
 by v0.0.1-rc (run 42356469404, tag created at 5834802 with no local tag). Tags created
 with the workflow's `GITHUB_TOKEN` do not trigger other workflows, so the `push: tags`
 path does not run a second time. Documented in HANDOFF.md §1.
+
+D-0087 (2026-11-07, p2/infra-qa) — `Swatinem/rust-cache` saves only on the integration
+branch and `main` (`save-if`); every other ref (feature branches, PRs, tags) restores
+from those entries through GitHub's default-branch fallback. Observation that led to it:
+run 42360575065 (518d120, after the rebase) found no rust-cache entry at all ("No cache
+found") and no libwebrtc cache on a branch that had saved both an hour earlier, its build
+took 7 m 21 s instead of 1 m 57 s (sccache Rust hits 53.9 % vs 87.5 %). Saves per entry
+are 0.1–0.5 GB (rust-cache, from the job logs) per job kind and branch, plus libwebrtc
+per OS and the sccache objects, across six active branches; GitHub evicts least recently
+used entries beyond 10 GB per repository. Eviction is the inferred cause: the cache-usage
+API is not reachable through this environment's proxy, so the usage figure itself is not
+verified. Effect is measurable only after the merge (integration-branch runs warm the
+shared entries); until then feature-branch builds rely on sccache. Rejected: dropping the
+libwebrtc cache (download is only 8 s on Linux, but the brief requires it and Windows/iOS
+archives are larger).
