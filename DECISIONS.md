@@ -313,3 +313,21 @@ Holding the minimum makes the probe result irrelevant whenever media starts. Re-
 the start over a higher estimate lowered it (measured dip 510 → 465 kbps), hence the
 "only if below" rule. Local, test ADM, 2 runs × 2 sides: 452.4, 452.4, 510, 510, …;
 release after ~2.87 s at BWE 600 kbps, no re-assert needed.
+
+D-0037 (2026-11-07, phase1) — Event listeners are stored as `Arc<dyn EventListener>`; the
+dispatcher clones the `Arc`s under a short read lock and calls `on_event` with no lock
+held. Before, the read lock was held across `on_event`, so a listener calling
+`subscribe()` (write lock) from inside `on_event` deadlocked — plausible for Phase 2 UI
+code (a view model subscribing another in response to the first event). Unit test
+`api::tests::listener_may_subscribe_from_on_event` subscribes from inside `on_event`
+with a 5 s timeout: it passes with the fix and times out ("dispatch deadlocked") with the
+old pattern. The UniFFI surface is unchanged (`subscribe(Box<dyn EventListener>)`). The
+raw event taps (CLI) are cloned once at start and never locked on the dispatch path.
+
+Debug environment variables (test/diagnostic only — never set them in shipped apps):
+`CALLXL_DISABLE_ANA` (Opus without the audio network adaptor), `CALLXL_EXTRA_FIELD_TRIALS`
+(field-trial string appended to CallXL's), `CALLXL_STATS_INTERVAL_MS` (stats sampling
+period instead of 1 s), `CALLXL_RTC_LOG` (`a|b|…` substrings of libwebrtc log lines to
+print, `*` for all; the sink runs on libwebrtc threads), `CALLXL_ICE_TRACE` (ICE policy
+inputs every 2 s; allocates on the network thread). Build-time, not debug:
+`CALLXL_APP_SECRET` (§5, from the CI secret).

@@ -112,6 +112,22 @@ struct Running {
     rt: tokio::runtime::Runtime,
 }
 
+/// Listener registry. Dispatch clones the `Arc`s under a short read lock and calls
+/// `on_event` with no lock held, so a listener may `subscribe()` from inside
+/// `on_event` (DECISIONS.md D-0037).
+type Listeners = Arc<RwLock<Vec<Arc<dyn EventListener>>>>;
+
+fn add_listener(listeners: &Listeners, listener: Box<dyn EventListener>) {
+    listeners.write().unwrap().push(Arc::from(listener));
+}
+
+fn dispatch(listeners: &Listeners, e: &Event) {
+    let snapshot: Vec<Arc<dyn EventListener>> = listeners.read().unwrap().clone();
+    for l in &snapshot {
+        l.on_event(e.clone());
+    }
+}
+
 #[derive(uniffi::Object)]
 pub struct CallXl {
     config: AppConfig,
@@ -119,7 +135,7 @@ pub struct CallXl {
     store: Arc<Store>,
     crypto: Arc<SignalCrypto>,
     shared: Arc<Shared>,
-    listeners: Arc<RwLock<Vec<Box<dyn EventListener>>>>,
+    listeners: Listeners,
     cmd_tx: mpsc::UnboundedSender<Command>,
     pending: Mutex<Option<(mpsc::UnboundedReceiver<Command>, mpsc::UnboundedReceiver<Event>)>>,
     running: Mutex<Option<Running>>,
@@ -263,10 +279,7 @@ impl CallXl {
                 for t in &taps {
                     let _ = t.send(e.clone());
                 }
-                let ls = listeners.read().unwrap();
-                for l in ls.iter() {
-                    l.on_event(e.clone());
-                }
+                dispatch(&listeners, &e);
             }
         });
 
@@ -363,7 +376,7 @@ impl CallXl {
     }
 
     pub fn subscribe(&self, listener: Box<dyn EventListener>) {
-        self.listeners.write().unwrap().push(listener);
+        add_listener(&self.listeners, listener);
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -538,4 +551,51 @@ fn _assert_send_sync() {
     fn f<T: Send + Sync>() {}
     f::<CallXl>();
     let _ = &config::APP_SECRET;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Counter(Arc<AtomicUsize>);
+    impl EventListener for Counter {
+        fn on_event(&self, _: Event) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Subscribes a second listener from inside its first `on_event`.
+    struct Subscriber {
+        registry: Listeners,
+        count: Arc<AtomicUsize>,
+        done: AtomicUsize,
+    }
+    impl EventListener for Subscriber {
+        fn on_event(&self, _: Event) {
+            if self.done.fetch_add(1, Ordering::SeqCst) == 0 {
+                add_listener(&self.registry, Box::new(Counter(self.count.clone())));
+            }
+        }
+    }
+
+    #[test]
+    fn listener_may_subscribe_from_on_event() {
+        let registry: Listeners = Arc::new(RwLock::new(Vec::new()));
+        let count = Arc::new(AtomicUsize::new(0));
+        add_listener(
+            &registry,
+            Box::new(Subscriber { registry: registry.clone(), count: count.clone(), done: AtomicUsize::new(0) }),
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        let r = registry.clone();
+        std::thread::spawn(move || {
+            dispatch(&r, &Event::DevicesChanged); // subscribes the counter (not called yet)
+            dispatch(&r, &Event::DevicesChanged); // counter sees this one
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(Duration::from_secs(5)).expect("dispatch deadlocked: subscribe() inside on_event");
+        assert_eq!(registry.read().unwrap().len(), 2);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
 }
