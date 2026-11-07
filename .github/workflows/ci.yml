@@ -178,12 +178,10 @@ jobs:
           path: ~/.cache/callxl/${{ env.WEBRTC_TAG }}
           key: libwebrtc-${{ env.WEBRTC_TAG }}-ios-device-arm64-ios-simulator-arm64
 
-      - name: Swift lint, tokens up to date (swiftformat, XcodeGen)
+      - name: XcodeGen; tokens up to date
         run: |
           set -euo pipefail
-          brew install swiftformat xcodegen
-          swiftformat --version
-          swiftformat --lint apps/ios
+          brew install xcodegen
           python3 packaging/ios/gen-tokens.py --check
 
       - name: Bonjour (DNS-SD) discovery backend on Apple
@@ -238,6 +236,15 @@ jobs:
           name: CallXL-unsigned.ipa
           path: target/ios/CallXL-unsigned.ipa
           if-no-files-found: error
+
+      - name: swiftformat --lint (pinned 0.64.6, same as local)
+        if: always()
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/swiftformat.zip https://github.com/nicklockwood/SwiftFormat/releases/download/0.64.6/swiftformat.zip
+          unzip -o -q /tmp/swiftformat.zip -d /tmp/swiftformat
+          /tmp/swiftformat/swiftformat --version
+          /tmp/swiftformat/swiftformat --lint apps/ios
 
       - name: Upload Xcode test results
         if: always()
