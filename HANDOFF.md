@@ -102,9 +102,9 @@ Numbers are from the linked runs' logs/artifacts.
 | Cloud lobby/session/TURN-credential flow (local Worker) | `signaling_roundtrip_wrangler` + Worker vitest | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e signaling, worker) | call set up via `wrangler dev`; 0 gaps |
 | Diagnostics: every §7 metric, export (schema v1) | `diagnostics_complete`, `export_schema_v1` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e diagnostics, linux build) | all §7 fields live under 20 ms ± 5 ms / 2 % loss; export "schema v1 valid, 6472 bytes, 16 series" |
 | Platform ADM (PulseAudio null sink) | `loopback_v4_lan_policy` with `CALLXL_E2E_ADM=platform` | [42356464865](https://github.com/user99672223/CallXL/actions/runs/42356464865) (e2e loopback) | LAN policy held with the real PulseAudio device module |
-| Desktop launches < 1 s (Linux runner) | desktop `--headless-smoke` (`startup_ms`) | TODO(orchestrator, p2/desktop) | |
-| Windows build, loopback e2e, installer install/uninstall | `windows` job | TODO(orchestrator, p2/desktop) | |
-| iOS Simulator tests, xcframework, unsigned IPA | `macos` job | TODO(orchestrator, p2/ios) | |
+| Desktop launches < 1 s (Linux runner) | desktop `--headless-smoke` (`startup_ms` = first frame rendered and core started), three launches under Xvfb after installing the `.deb` | [42364027461](https://github.com/user99672223/CallXL/actions/runs/42364027461), final green [42367829259](https://github.com/user99672223/CallXL/actions/runs/42367829259) (linux build) | `startup_ms` 474 / 141 / 142 ms (`ui_ms` 474 / 136 / 137, `core_ms` 130 / 141 / 142); `callxl_0.1.0_amd64.deb` 15.5 MB installed with `apt`, `callxl --version` ran; every screen rendered by the screenshot test; `gui_join.sh`: the GUI found a `callxl-cli` peer over real mDNS and joined (LAN host/host, connected 2.1 s after launch, run [42361333414](https://github.com/user99672223/CallXL/actions/runs/42361333414)) |
+| Windows build, loopback e2e, installer install/uninstall | `windows` job (`_build-windows.yml`): static CRT build, unit tests, `loopback_v4_lan_policy` with the test ADM, Inno Setup, silent install / `--version` / Start-menu shortcut / silent uninstall | [42367829259](https://github.com/user99672223/CallXL/actions/runs/42367829259) | `CallXL-Setup.exe` 14.95 MB; installed to `%LOCALAPPDATA%\Programs\CallXL`, launched, uninstall removed the folder and the shortcut; release binary 38.8 MB |
+| iOS Simulator tests, xcframework, unsigned IPA | `macos` job (`_build-macos.yml`): xcframework (device arm64 + Simulator arm64), `CallXLTests` 9/9 (core through the Swift bindings: start, session event < 2 s, schema-v1 export, stop; AVAudioSession config; CallKit sequence; Info.plist keys), `CallXLUITests` smoke on the Release build (every screen), `swiftformat --lint`, launch gate | [42376780186](https://github.com/user99672223/CallXL/actions/runs/42376780186) | `CallXL-unsigned.ipa` 8.3 MB with `Payload/CallXL.app/Frameworks/CallXLCore.framework`; xcframework zip 15.3 MB; launch to Home (warm median, `simctl launch`, Release): CallXL 1144 ms vs bare SwiftUI app 600 ms on the same runner, overhead 544 ms ≤ 700 ms budget (D-0107). The absolute number depends on the runner (bare app 410–746 ms across jobs); **real-iPhone launch time is unmeasured** |
 | Release from a clean tag with all three artifacts | `release.yml` | dry-run (no app packages yet): [42356469404](https://github.com/user99672223/CallXL/actions/runs/42356469404) → [v0.0.1-rc](https://github.com/user99672223/CallXL/releases/tag/v0.0.1-rc). **TODO(orchestrator):** v0.1.0 run | all gates green (3 builds, 6 netem legs) in 3 m 57 s |
 | Worker deploy workflow | `worker.yml` | deploy: [42355101376](https://github.com/user99672223/CallXL/actions/runs/42355101376); no-secrets path: [42355783034](https://github.com/user99672223/CallXL/actions/runs/42355783034) | deployed `https://callxl.hbadgujar44.workers.dev`, `/health` ok; without secrets: green, manual steps printed |
 
@@ -151,7 +151,42 @@ Use "Export report" when something fails and attach the `CallXL-diagnostics-<ts>
    that trusted it. *Pass:* exactly one "Key changed — trust again?" prompt; before
    accepting, no call is set up.
 
-**TODO(orchestrator):** add anything the desktop/iOS agents flagged.
+Desktop items that CI could not exercise (runners have no tray host, no notification
+daemon a user sees, no real file manager, no GPU, no unplug events):
+
+9. **Tray icon and close-to-tray.** Windows, GNOME with the AppIndicator extension, KDE.
+   *Pass:* tray icon present with Mute / Leave / Show / Quit; closing the window during a
+   call keeps the call running and the tray icon restores it. (Without a tray host the app
+   logs the failure and runs without a tray.)
+10. **Toasts.** Receive a chat message and a file offer while the window is unfocused.
+    *Pass:* a Windows toast / D-Bus notification appears for each.
+11. **Drag-and-drop.** Drag a file from Explorer / Files onto the in-call window. *Pass:*
+    the recipient picker opens with the file listed.
+12. **Device unplug.** Unplug the selected headset during a call. *Pass:* audio falls back
+    to the default device without leaving the call; the picker updates.
+13. **Speaking glow.** On a real GPU the participant-tile glow animates smoothly (60 fps)
+    while someone talks; the tile grid does not re-layout.
+14. **Windows SmartScreen.** First run of `CallXL-Setup.exe` shows the unsigned-installer
+    warning; "More info → Run anyway" proceeds and the app launches at the end of setup.
+
+iOS items that the Simulator could not exercise:
+
+15. **LAN discovery on a real iPhone.** The iOS build uses the system Bonjour API (D-0101)
+    with `NSBonjourServices` / `NSLocalNetworkUsageDescription`; on first launch iOS asks
+    for local-network permission. *Pass:* after allowing, the desktop session appears with
+    the LAN glyph within ~3 s and the call shows path `LAN`.
+16. **CallKit on hardware.** Start a call: the system call UI shows CallXL; lock the
+    screen; take a phone call (the CallXL call holds, then resumes); route to Bluetooth
+    earbuds and to the speaker from the route picker. *Pass:* no rejoin needed at any step.
+17. **Files and Share.** Receive a file, open the Files app → On My iPhone → CallXL, open
+    it; use the share sheet from the file card. *Pass:* the file is visible and opens.
+18. **Launch time.** Cold and warm launch to the Home screen on the phone, by stopwatch or
+    Instruments. CI measured 1144 ms on a shared Simulator runner (544 ms over a bare app);
+    the real-device number is unknown.
+
+Repository cleanup the user should do once in the GitHub UI (this environment's git proxy
+refuses branch deletions): delete the scratch branches `p2/infra-qa-integration-check` and
+`p2/desktop-wintest`; optionally delete the `v0.0.1-rc` prerelease and its tag.
 
 ## 7. Known limitations
 

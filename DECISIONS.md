@@ -789,3 +789,16 @@ Reference job (run 42373009146, simctl, Release, warm medians): bare SwiftUI app
 951 ms (overhead 541 ms). The overhead also grows on slow runners (run 42370298128:
 1583 − 746 = 837 ms), so the budget catches a core-load regression but can still trip on an
 unusually slow runner. Launch time on a real iPhone is unmeasured (HANDOFF.md).
+
+D-0190 (2026-11-07, orchestrator) — DECISIONS.md housekeeping after the four merges. The
+two one-line p2/ios entries numbered D-0038 and D-0039 (both "iOS core packaging: …holds
+a") are truncated rebase leftovers of D-0100 and carry no decision of their own; D-0100
+is authoritative. The phase1 D-0038 (timing races) is unaffected. Numbering ranges used
+by the Phase 2 agents: p2/desktop D-0050–D-0061 and D-0130+, p2/infra-qa D-0070+, p2/ios
+D-0100+, phase1 follow-ups D-0160+, orchestrator D-0190+. Gaps are expected.
+
+D-0191 (2026-11-07, orchestrator) — The iOS launch requirement (§1.5, §14 "Simulator UI
+smoke test passes") is gated relative to a bare SwiftUI app in the same job (D-0107),
+because the shared Simulator runner varied 2x between jobs for an unchanged bare app
+(410–746 ms). The absolute Simulator number (1144 ms in run 42376780186) is reported, not
+gated, and real-iPhone launch time is listed as unmeasured in HANDOFF.md §5/§6.
