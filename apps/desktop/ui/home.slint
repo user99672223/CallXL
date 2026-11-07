@@ -1,0 +1,222 @@
+import { ScrollView, LineEdit } from "std-widgets.slint";
+import { Colors, Space, Radius, Motion, Type, Size } from "@tokens";
+import { App, SessionItem, DeviceItem } from "state.slint";
+import { Icons, Icon, Label, Muted, Title, Card, Button, Avatar, Pill, Dot, SectionHeader } from "widgets.slint";
+
+component SessionCard inherits Rectangle {
+    in property <SessionItem> item;
+    min-height: 76px;
+    border-radius: Radius.lg;
+    background: touch.has-hover ? Colors.surface-raised : Colors.surface;
+    border-width: 1px;
+    border-color: root.item.joined ? Colors.accent : Colors.border;
+    animate background { duration: Motion.fast; }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            if (!root.item.joined) { App.join-session(root.item.id); } else { App.screen = 1; }
+        }
+    }
+    HorizontalLayout {
+        padding: Space.lg;
+        spacing: Space.lg;
+        Rectangle {
+            width: 44px;
+            height: 44px;
+            y: (parent.height - self.height) / 2;
+            border-radius: Radius.md;
+            background: Colors.accent.with-alpha(0.14);
+            Icon { path: Icons.call; color: Colors.accent; size: 22px; }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: Space.xs;
+            HorizontalLayout {
+                spacing: Space.sm;
+                Text {
+                    text: root.item.title;
+                    color: Colors.text;
+                    font-size: Type.subtitle-size;
+                    font-weight: Type.subtitle-weight;
+                    font-family: Type.family;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+            Muted {
+                text: root.item.members;
+                overflow: elide;
+            }
+        }
+        if root.item.lan: Pill {
+            y: (parent.height - self.height) / 2;
+            text: "LAN";
+            icon: Icons.lan;
+            tint: Colors.success;
+        }
+        Button {
+            y: (parent.height - self.height) / 2;
+            height: Size.tap-target;
+            text: root.item.joined ? "Open" : "Join";
+            kind: root.item.joined ? "ghost" : "primary";
+            clicked => {
+                if (!root.item.joined) { App.join-session(root.item.id); } else { App.screen = 1; }
+            }
+        }
+    }
+}
+
+component DeviceRow inherits Rectangle {
+    in property <DeviceItem> item;
+    min-height: 52px;
+    HorizontalLayout {
+        spacing: Space.md;
+        Avatar {
+            y: (parent.height - self.height) / 2;
+            initials: root.item.initials;
+            hue: root.item.hue;
+            size: 34px;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: Space.xxs;
+            Label { text: root.item.name; overflow: elide; }
+            HorizontalLayout {
+                spacing: Space.xs;
+                Dot { y: (parent.height - self.height) / 2; on: root.item.online; }
+                Muted { text: root.item.online ? "Online" : "Offline"; }
+            }
+        }
+    }
+}
+
+export component HomeScreen inherits Rectangle {
+    property <bool> editing-name;
+    background: Colors.bg;
+    HorizontalLayout {
+        padding: Space.xxl;
+        spacing: Space.xxl;
+        VerticalLayout {
+            horizontal-stretch: 2;
+            spacing: Space.xl;
+            // Header: who I am.
+            HorizontalLayout {
+                spacing: Space.lg;
+                Avatar {
+                    y: (parent.height - self.height) / 2;
+                    initials: App.device-initials;
+                    hue: App.device-hue;
+                    size: 48px;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: Space.xxs;
+                    if !root.editing-name: HorizontalLayout {
+                        spacing: Space.sm;
+                        Text {
+                            text: App.display-name;
+                            color: Colors.text;
+                            font-size: Type.headline-size;
+                            font-weight: Type.headline-weight;
+                            font-family: Type.family;
+                            overflow: elide;
+                        }
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: Radius.sm;
+                            background: edit.has-hover ? Colors.surface-raised : transparent;
+                            Muted { text: "Edit"; }
+                            edit := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.editing-name = true; }
+                            }
+                        }
+                    }
+                    if root.editing-name: name-edit := LineEdit {
+                        text: App.display-name;
+                        font-size: Type.subtitle-size;
+                        placeholder-text: "Your name, as others see it";
+                        init => { self.focus(); self.select-all(); }
+                        accepted(t) => {
+                            if (t != "") { App.set-display-name(t); }
+                            root.editing-name = false;
+                        }
+                    }
+                    Muted { text: App.network-status; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            HorizontalLayout {
+                spacing: Space.md;
+                SectionHeader {
+                    text: "OPEN SESSIONS";
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Button {
+                    text: "New session";
+                    icon: Icons.plus;
+                    clicked => { App.new-session-open = true; }
+                }
+            }
+            if App.sessions.length == 0: Card {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: Space.md;
+                    padding: Space.xxl;
+                    Icon {
+                        x: (parent.width - self.width) / 2;
+                        path: Icons.lan;
+                        size: 40px;
+                        color: Colors.text-muted;
+                    }
+                    Text {
+                        horizontal-alignment: center;
+                        text: "No open sessions yet";
+                        color: Colors.text;
+                        font-size: Type.subtitle-size;
+                        font-weight: Type.subtitle-weight;
+                        font-family: Type.family;
+                    }
+                    Muted {
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                        text: "Start one and everyone on your network sees it here instantly.";
+                    }
+                }
+            }
+            if App.sessions.length > 0: ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: Space.md;
+                    alignment: start;
+                    for s in App.sessions: SessionCard { item: s; }
+                }
+            }
+        }
+        Card {
+            horizontal-stretch: 1;
+            min-width: 240px;
+            max-width: 360px;
+            VerticalLayout {
+                padding: Space.xl;
+                spacing: Space.md;
+                SectionHeader { text: "TRUSTED DEVICES"; }
+                if App.trusted.length == 0: Muted {
+                    wrap: word-wrap;
+                    text: "Devices you trust appear here. You will be asked the first time someone joins your call.";
+                }
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: Space.xs;
+                        for d in App.trusted: DeviceRow { item: d; }
+                    }
+                }
+            }
+        }
+    }
+}

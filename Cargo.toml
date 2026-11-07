@@ -6,6 +6,7 @@ members = [
     "crates/signal",
     "crates/lan",
     "crates/cli",
+    "apps/desktop",
     "tests/e2e",
 ]
 exclude = ["third_party/webrtc-sys"]

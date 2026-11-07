@@ -1,0 +1,27 @@
+[package]
+name = "callxl-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "CallXL desktop app (Slint): private peer-to-peer encrypted voice chat"
+build = "build.rs"
+
+[lib]
+name = "callxl_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "callxl"
+path = "src/main.rs"
+
+[dependencies]
+callxl-core = { workspace = true }
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software", "system-tray", "unstable-winit-030"] }
+
+[build-dependencies]
+slint-build = "=1.18.1"
+serde_json = { workspace = true }
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"

@@ -1,0 +1,313 @@
+// Small design-system widgets built on the generated tokens (`@tokens`).
+
+import { Colors, Space, Radius, Motion, Type, Size } from "@tokens";
+
+// 24 x 24 stroke icons (SVG path syntax).
+export global Icons {
+    out property <string> home: "M3 11 L12 4 L21 11 M5.5 9.5 V20 H18.5 V9.5 M10 20 V14 H14 V20";
+    out property <string> call: "M4 9 h4 l5 -4 v14 l-5 -4 h-4 Z M16 9 a4 4 0 0 1 0 6 M18.5 6.5 a7.5 7.5 0 0 1 0 11";
+    out property <string> chat: "M5 5 h14 a2 2 0 0 1 2 2 v8 a2 2 0 0 1 -2 2 h-8 l-5 4 v-4 h-1 a2 2 0 0 1 -2 -2 v-8 a2 2 0 0 1 2 -2 Z";
+    out property <string> activity: "M3 12 h4 l3 -8 l4 16 l3 -8 h4";
+    out property <string> sliders: "M4 7 H11 M15 7 H20 M13 5 V9 M4 17 H7 M11 17 H20 M9 15 V19 M4 12 H15 M19 12 H20 M17 10 V14";
+    out property <string> plus: "M12 5 V19 M5 12 H19";
+    out property <string> mic: "M12 3 a3 3 0 0 1 3 3 v5 a3 3 0 0 1 -6 0 v-5 a3 3 0 0 1 3 -3 Z M5 11 a7 7 0 0 0 14 0 M12 18 V21";
+    out property <string> mic-off: "M12 3 a3 3 0 0 1 3 3 v5 a3 3 0 0 1 -6 0 v-5 a3 3 0 0 1 3 -3 Z M5 11 a7 7 0 0 0 14 0 M12 18 V21 M3 3 L21 21";
+    out property <string> hangup: "M3 14 c5 -5 13 -5 18 0 l-2.5 3 l-3.5 -1.5 v-2.5 c-2 -0.7 -4 -0.7 -6 0 v2.5 l-3.5 1.5 Z";
+    out property <string> lan: "M9 3 h6 v4 h-6 Z M3 15 h6 v5 h-6 Z M15 15 h6 v5 h-6 Z M12 7 V11 M6 15 V11 H18 V15";
+    out property <string> file: "M6 3 h8 l5 5 v13 h-13 Z M14 3 v5 h5";
+    out property <string> upload: "M12 16 V5 M7 10 L12 5 L17 10 M5 20 H19";
+    out property <string> folder: "M3 6 h6 l2 2 h10 v11 h-18 Z";
+    out property <string> check: "M5 12 l4 4 l10 -10";
+    out property <string> close: "M6 6 L18 18 M18 6 L6 18";
+    out property <string> send: "M4 12 L20 4 L14 20 L11 13 Z M11 13 L20 4";
+    out property <string> shield: "M12 3 l8 3 v6 c0 5 -3.5 8 -8 9 c-4.5 -1 -8 -4 -8 -9 v-6 Z M8.5 12 l2.5 2.5 l4.5 -4.5";
+    out property <string> speaker: "M4 9 h4 l5 -4 v14 l-5 -4 h-4 Z M16 9 a4 4 0 0 1 0 6";
+    out property <string> download: "M12 4 V15 M7 10 L12 15 L17 10 M5 20 H19";
+    out property <string> cloud: "M7 18 h10 a4 4 0 0 0 0 -8 a6 6 0 0 0 -11.5 1.5 a3.3 3.3 0 0 0 1.5 6.5 Z";
+}
+
+export component Icon inherits Path {
+    in property <string> path;
+    in property <color> color: Colors.text;
+    in property <length> size: 20px;
+    width: self.size;
+    height: self.size;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    commands: self.path;
+    stroke: self.color;
+    stroke-width: 1.8px;
+    stroke-line-cap: round;
+    fill: transparent;
+}
+
+export component Label inherits Text {
+    color: Colors.text;
+    font-size: Type.body-size;
+    font-weight: Type.body-weight;
+    font-family: Type.family;
+}
+
+export component Muted inherits Text {
+    color: Colors.text-muted;
+    font-size: Type.caption-size;
+    font-family: Type.family;
+}
+
+export component Title inherits Text {
+    color: Colors.text;
+    font-size: Type.title-size;
+    font-weight: Type.title-weight;
+    font-family: Type.family;
+}
+
+export component Card inherits Rectangle {
+    background: Colors.surface;
+    border-radius: Radius.lg;
+    border-width: 1px;
+    border-color: Colors.border;
+}
+
+// kind: "primary" | "ghost" | "danger" | "quiet"
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <string> kind: "primary";
+    in property <bool> enabled: true;
+    callback clicked();
+    min-height: Size.tap-target;
+    min-width: Size.tap-target;
+    border-radius: Radius.md;
+    opacity: root.enabled ? 1 : 0.45;
+    property <color> base: root.kind == "primary" ? Colors.accent : root.kind == "danger" ? Colors.danger : root.kind == "ghost" ? Colors.surface-raised : transparent;
+    property <color> fg: root.kind == "primary" ? Colors.on-accent : root.kind == "danger" ? #FFFFFF : Colors.text;
+    background: touch.pressed ? base.darker(15%) : touch.has-hover && root.enabled ? (root.kind == "quiet" ? Colors.surface-raised : base.brighter(8%)) : base;
+    border-width: root.kind == "ghost" ? 1px : 0px;
+    border-color: Colors.border;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.text;
+    HorizontalLayout {
+        padding-left: root.text == "" ? Space.sm : Space.lg;
+        padding-right: root.text == "" ? Space.sm : Space.lg;
+        spacing: Space.sm;
+        alignment: center;
+        if root.icon != "": Icon {
+            y: (parent.height - self.height) / 2;
+            path: root.icon;
+            color: root.fg;
+            size: 18px;
+        }
+        if root.text != "": Text {
+            vertical-alignment: center;
+            text: root.text;
+            color: root.fg;
+            font-size: Type.body-strong-size;
+            font-weight: Type.body-strong-weight;
+            font-family: Type.family;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Large round control button (call bar).
+export component RoundButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> tip;
+    in property <bool> active;
+    in property <bool> danger;
+    in property <int> badge;
+    callback clicked();
+    width: 56px;
+    height: 56px;
+    border-radius: self.width / 2;
+    property <color> base: root.danger ? Colors.danger : root.active ? Colors.text : Colors.surface-raised;
+    background: touch.pressed ? base.darker(15%) : touch.has-hover ? base.brighter(10%) : base;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.tip;
+    Icon {
+        path: root.icon;
+        size: 24px;
+        color: root.danger ? #FFFFFF : root.active ? Colors.bg : Colors.text;
+    }
+    if root.badge > 0: Rectangle {
+        x: parent.width - 18px;
+        y: 0;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: Colors.accent;
+        Text {
+            text: root.badge > 9 ? "9+" : root.badge;
+            color: Colors.on-accent;
+            font-size: 10px;
+            font-weight: 600;
+            font-family: Type.family;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Avatar inherits Rectangle {
+    in property <string> initials;
+    in property <color> hue: Colors.accent;
+    in property <length> size: 40px;
+    width: self.size;
+    height: self.size;
+    border-radius: self.size / 2;
+    background: root.hue.with-alpha(0.22);
+    Text {
+        text: root.initials;
+        color: root.hue.brighter(40%);
+        font-size: root.size * 0.38;
+        font-weight: 600;
+        font-family: Type.family;
+    }
+}
+
+export component Pill inherits Rectangle {
+    in property <string> text;
+    in property <color> tint: Colors.text-muted;
+    in property <string> icon;
+    height: 24px;
+    border-radius: 12px;
+    background: root.tint.with-alpha(0.14);
+    HorizontalLayout {
+        padding-left: Space.sm;
+        padding-right: Space.sm;
+        spacing: Space.xs;
+        if root.icon != "": Icon {
+            y: (parent.height - self.height) / 2;
+            path: root.icon;
+            size: 14px;
+            color: root.tint;
+        }
+        Text {
+            vertical-alignment: center;
+            text: root.text;
+            color: root.tint;
+            font-size: Type.caption-size;
+            font-weight: 600;
+            font-family: Type.family;
+        }
+    }
+}
+
+export component Dot inherits Rectangle {
+    in property <bool> on;
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    background: root.on ? Colors.success : Colors.text-muted.with-alpha(0.5);
+}
+
+// Switch with a label row (large hit target).
+export component ToggleRow inherits Rectangle {
+    in property <string> text;
+    in property <string> detail;
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+    min-height: 56px;
+    opacity: root.enabled ? 1 : 0.5;
+    HorizontalLayout {
+        spacing: Space.lg;
+        VerticalLayout {
+            alignment: center;
+            spacing: Space.xxs;
+            Label { text: root.text; }
+            if root.detail != "": Muted { text: root.detail; wrap: word-wrap; }
+        }
+        Rectangle {
+            width: 44px;
+            height: 26px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 13px;
+            background: root.checked ? Colors.accent : Colors.surface-raised;
+            border-width: root.checked ? 0px : 1px;
+            border-color: Colors.border;
+            animate background { duration: Motion.fast; }
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                y: 3px;
+                x: root.checked ? parent.width - self.width - 3px : 3px;
+                border-radius: 10px;
+                background: root.checked ? Colors.on-accent : Colors.text-muted;
+                animate x { duration: Motion.normal; easing: ease-out; }
+            }
+        }
+    }
+    TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+// 60 s sparkline in a 100 x 30 viewbox, commands precomputed off the UI thread.
+export component Sparkline inherits Rectangle {
+    in property <string> commands;
+    in property <color> tint: Colors.accent;
+    height: 30px;
+    if root.commands != "": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 30;
+        commands: root.commands;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        stroke-line-join: round;
+        fill: transparent;
+    }
+}
+
+// Full-window modal scrim with a centred card.
+export component Modal inherits Rectangle {
+    in property <length> card-width: 420px;
+    callback dismissed();
+    background: #00000099;
+    TouchArea {
+        clicked => { root.dismissed(); }
+    }
+    card := Card {
+        width: min(root.card-width, root.width - 2 * Space.xl);
+        height: content.preferred-height;
+        background: Colors.surface;
+        drop-shadow-blur: 32px;
+        drop-shadow-color: #00000066;
+        TouchArea {}
+        content := VerticalLayout {
+            padding: Space.xl;
+            spacing: Space.lg;
+            @children
+        }
+    }
+}
+
+export component SectionHeader inherits HorizontalLayout {
+    in property <string> text;
+    spacing: Space.sm;
+    Text {
+        text: root.text;
+        color: Colors.text-muted;
+        font-size: Type.caption-size;
+        font-weight: 600;
+        font-family: Type.family;
+        letter-spacing: 0.6px;
+        vertical-alignment: center;
+    }
+    @children
+}
