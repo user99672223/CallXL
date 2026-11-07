@@ -52,7 +52,7 @@ xcodebuild test -project apps/ios/CallXL.xcodeproj -scheme CallXL \
 packaging/ios/build-unsigned-ipa.sh        # target/ios/CallXL-unsigned.ipa
 ```
 
-The simulator slice is arm64 only (Apple-silicon Macs); see `DECISIONS.md` D-0038.
+The simulator slice is arm64 only (Apple-silicon Macs); see `DECISIONS.md` D-0039.
 Design tokens come from `design/tokens.json`; after changing it run
 `packaging/ios/gen-tokens.py` (CI checks that `Theme/Tokens.swift` is current).
 `swiftformat --lint apps/ios` must be clean.

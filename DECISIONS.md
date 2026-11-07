@@ -346,7 +346,7 @@ for the rest of the call (no evaluation at all on either side of
 `netem_path_switch_v4_to_v6`, which therefore never returned to IPv6). Any recheck in the
 second half of the pending window now counts.
 
-D-0038 (2026-11-07, p2/ios) — iOS core packaging: `CallXLCore.xcframework` holds a
+D-0039 (2026-11-07, p2/ios) — iOS core packaging: `CallXLCore.xcframework` holds a
 *dynamic* `CallXLCore.framework` per slice, linked from `cargo rustc -p callxl-core
 --crate-type cdylib --release` (`-install_name @rpath/CallXLCore.framework/CallXLCore`,
 `-ObjC` so libwebrtc's Objective-C categories used by its iOS ADM/`RTCAudioSession` are
@@ -365,7 +365,7 @@ libwebrtc; it reads the metadata from the unstripped device dylib, which is then
 `strip -x`'d. `uniffi.toml` `ffi_module_name` = `CallXLCore` (was `CallXLCoreFFI`) so the
 generated Swift imports the framework module; header/modulemap file names are unchanged.
 
-D-0039 (2026-11-07, p2/ios) — LAN discovery on Apple targets uses the system DNS-SD API
+D-0040 (2026-11-07, p2/ios) — LAN discovery on Apple targets uses the system DNS-SD API
 (`dns_sd.h`: DNSServiceRegister/Browse/Resolve/GetAddrInfo, `crates/lan/src/dnssd.rs`)
 instead of mdns-sd. Since iOS 14, sending/receiving multicast UDP on an app's own BSD
 sockets requires Apple's restricted `com.apple.developer.networking.multicast`
@@ -377,13 +377,13 @@ listener binds `0.0.0.0`), link-local IPv6 dropped. One thread owns every DNSSer
 (poll on their sockets), so no locks. Proven in CI on macOS (`two_peers_discover_each_other`);
 on a real iPhone it is a HANDOFF item (the Simulator does not enforce the entitlement).
 
-D-0040 (2026-11-07, p2/ios) — iOS keychain entry for the identity is the fixed name
+D-0041 (2026-11-07, p2/ios) — iOS keychain entry for the identity is the fixed name
 `identity` (service `com.callxl.app`), not a hash of the data directory: an iOS app's
 container path contains a UUID that may change on update/re-signing, which would have
 generated a new identity (and a "Key changed" prompt at every peer) after a weekly
 re-sideload. One app sandbox = one profile, so nothing collides.
 
-D-0041 (2026-11-07, p2/ios) — iOS audio session and CallKit: libwebrtc's iOS ADM configures
+D-0042 (2026-11-07, p2/ios) — iOS audio session and CallKit: libwebrtc's iOS ADM configures
 the session itself from `RTCAudioSessionConfiguration.webRTCConfiguration` (which lacks
 `.defaultToSpeaker`), and WebRTC's CallKit integration is `RTCAudioSession.useManualAudio`
 + `isAudioEnabled` toggled in `provider(_:didActivate:)`. The prebuilt is built with
