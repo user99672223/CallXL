@@ -345,3 +345,93 @@ due time; a timer firing ≥ 2 ms early ended the chain and the switching policy
 for the rest of the call (no evaluation at all on either side of
 `netem_path_switch_v4_to_v6`, which therefore never returned to IPv6). Any recheck in the
 second half of the pending window now counts.
+
+D-0050 (2026-11-07, p2/desktop) — Numbering: p2/desktop uses D-0050…D-0069 so entries do
+not collide with the concurrent branches (phase1 D-0037+, p2/ios D-0039+, p2/infra-qa
+D-0042+ at the time of writing). Gaps in the sequence are therefore expected.
+
+D-0051 (2026-11-07, p2/desktop) — Desktop UI toolkit pin: `slint = "=1.18.1"` with
+`backend-winit` + `renderer-femtovg` (OpenGL, the on-screen renderer) + `renderer-software`
+(offscreen screenshot tests, and Slint's fallback when no GL context can be created) +
+`system-tray` + `unstable-winit-030` (winit window events for drag-and-drop/focus; pinned
+exactly because that module may change in minor releases). Rejected: Skia (pulls a
+prebuilt Skia download and a much larger binary for no visible gain in this flat UI);
+`accessibility` off for now (accesskit opens an AT-SPI D-Bus connection at startup) — a
+v0.2 candidate. The UI is compiled by `slint-build` (never interpreted, §10).
+
+D-0052 (2026-11-07, p2/desktop) — Design tokens: `design/tokens.json` is turned into the
+Slint library `@tokens` by `apps/desktop/build.rs` in `OUT_DIR` (not a committed
+`ui/tokens.slint`, which would go stale and dirty the tree on every token edit). Fonts:
+Inter 4.1 Regular + SemiBold, Latin subset via `pyftsubset`, embedded with Slint's font
+import: 101 832 + 103 688 bytes vs 411 640 + 418 540 for the full TTFs. Identical text on
+Windows and Linux; other scripts fall back to system fonts. Icons: `design/icons/
+generate.py` (Pillow 12.3, present on the dev machine) renders SVG, PNG 16…1024 and a
+multi-size `.ico` from one geometry; outputs are committed so builds never need Python.
+
+D-0053 (2026-11-07, p2/desktop) — Tray: Slint 1.18's native `SystemTrayIcon` (ksni
+StatusNotifierItem over zbus on Linux, `Shell_NotifyIconW` on Windows) instead of the
+`tray-icon` crate, whose Linux backend needs GTK3 + libayatana-appindicator and a GTK main
+loop. Menu: Show, Mute/Unmute, Leave call, Quit, bound reactively to the call state. A
+missing StatusNotifier host is non-fatal (observed under Xvfb without a session bus:
+"Failed to create system tray icon … D-Bus connection error"; the app runs on, and closing
+the window then quits instead of hiding).
+
+D-0054 (2026-11-07, p2/desktop) — Single instance: a local socket from `interprocess` 2.4
+(abstract Unix socket on Linux — no stale file after a crash — and a named pipe on
+Windows), named after the user and the profile directory. A second launch connects, sends
+`show`, and exits; the first brings its window forward. `single-instance` was rejected
+because it can only detect, not signal, the running instance. Unit test
+`instance::tests::second_launch_focuses_the_first`.
+
+D-0055 (2026-11-07, p2/desktop) — Drag-and-drop: winit `HoveredFile`/`DroppedFile` through
+`slint::winit_030::WinitWindowAccessor::on_winit_window_event`. Slint 1.18's `DropArea`
+only receives drags started by a Slint `DragArea`: the winit backend has no
+`DroppedFile` handling (`grep -rn DroppedFile i-slint-backend-winit-1.18.1` → nothing).
+Drops arriving within 60 ms are batched, then the recipient picker opens (§6: sender
+chooses recipients). A "Send a file" button uses `rfd` 0.17 (xdg-desktop-portal / Win32
+dialog) on a helper thread. Notifications: `notify-rust` on its own thread (the D-Bus call
+blocks for a round trip); Windows AppUserModelID `com.callxl.app` is set by the process
+(`SetCurrentProcessExplicitAppUserModelID`) and on the installer's shortcuts.
+
+D-0056 (2026-11-07, p2/desktop) — Core ⇄ UI threading: `CallXl::new` and `start` run on a
+dedicated `callxl-ui-bridge` thread (keystore lookup, SQLite open and media-engine creation
+never touch the UI thread, so the window appears at once). `EventListener::on_event` only
+does `Sender::send` into that thread's channel; the bridge diffs a fresh `snapshot()` after
+every event (and at least once a second) against the previous one and posts patches with
+`slint::invoke_from_event_loop`; patches update `VecModel` rows in place (`set_row_data`
+only when a row changed). Conversions, labels and sparkline paths are computed on the
+bridge thread. Own chat messages are shown optimistically with the id `send_chat` returns.
+Audio devices: the core emits `DevicesChanged` only after a user selection, so the bridge
+polls `list_audio_devices` every 3 s; a chosen device that disappears falls back to the
+system default with a toast (hot-switch).
+
+D-0057 (2026-11-07, p2/desktop) — Window close: during a call (tray available) the window
+hides and the call continues in the tray (a one-time notification says so); otherwise the
+app quits. The uninstaller removes the program folder and shortcuts but keeps
+`%APPDATA%\CallXL` (identity keys, trusted devices, chat history), like any per-user app;
+the Linux profile is `$XDG_DATA_HOME/CallXL`. A theme preference lives in
+`<profile>/desktop.json` (the only desktop-specific setting; the core owns the rest).
+
+D-0058 (2026-11-07, p2/desktop) — Minimal bug fixes outside `apps/` so the workspace
+builds on Windows (no API change): `callxl-cli` gates its `unix://` control socket with
+`#[cfg(unix)]` (TCP control, which the harness uses, is unchanged); the e2e Worker helper
+gates `process_group(0)`; the harness looks for `callxl-cli{EXE_SUFFIX}`;
+`scripts/ci-webrtc-cache.sh` accepts `lib/webrtc.lib` and exports a native path
+(`cygpath -m`) under Git Bash.
+
+D-0059 (2026-11-07, p2/desktop) — GUI e2e (`apps/desktop/tests/gui_join.sh`): the desktop
+app runs under Xvfb with its production configuration (platform audio device, real mDNS,
+no bind restriction); a `callxl-cli` peer with the test ADM creates a session; the GUI
+joins it through its own UI command (`CALLXL_DEBUG_AUTOJOIN=1` invokes the
+`App.join-session` callback for the first listed session — the same path as a click;
+pixel-coordinate clicking with xdotool was rejected as fragile). Pass = the CLI's GetStats
+show a connected path to the GUI with media flowing (and, in CI with PulseAudio, audio
+received from the GUI). Local run (dev machine, no PulseAudio, eth0 192.0.2.2): joined and
+connected 2.1 s after launch, "Lan path, 192.0.2.2:52267 -> 192.0.2.2:37082 (host/host),
+send 284 kbps", CLI call state InCall.
+
+D-0060 (2026-11-07, p2/desktop) — `callxl --headless-smoke` (§14 "launches under 1 s"):
+`startup_ms` is measured by the app from the first line of `main` until both the window is
+live (first event-loop turn after `show()`) and `CallXl::start` has returned (media engine,
+LAN listener, mDNS). It uses a throw-away profile so CI never creates a real identity.
+Local debug build under `xvfb-run`: `startup_ms=494`.

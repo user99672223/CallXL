@@ -13,7 +13,7 @@ CACHE_ROOT="${CALLXL_WEBRTC_CACHE:-$HOME/.cache/callxl}"
 DEST="$CACHE_ROOT/$TAG/$TRIPLE"
 URL="https://github.com/livekit/rust-sdks/releases/download/$TAG/webrtc-$TRIPLE.zip"
 
-if [[ ! -f "$DEST/include/api/peer_connection_interface.h" || ! -f "$DEST/lib/libwebrtc.a" ]]; then
+if [[ ! -f "$DEST/include/api/peer_connection_interface.h" || ! ( -f "$DEST/lib/libwebrtc.a" || -f "$DEST/lib/webrtc.lib" ) ]]; then
   echo "downloading $URL" >&2
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
@@ -26,6 +26,11 @@ if [[ ! -f "$DEST/include/api/peer_connection_interface.h" || ! -f "$DEST/lib/li
   mkdir -p "$(dirname "$DEST")"
   mv "$src" "$DEST"
   chmod -R u+rwX "$DEST"
+fi
+
+# Windows (Git Bash): build scripts need a native path, not /c/Users/….
+if command -v cygpath >/dev/null 2>&1; then
+  DEST="$(cygpath -m "$DEST")"
 fi
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then

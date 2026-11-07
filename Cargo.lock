@@ -724,6 +724,7 @@ dependencies = [
  "slint",
  "slint-build",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

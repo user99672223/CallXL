@@ -26,13 +26,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: System packages (clang 21 for libwebrtc's hermetic libc++, glib headers, PulseAudio)
+      - name: System packages (clang 21 for libwebrtc's hermetic libc++, glib headers, PulseAudio, Xvfb + desktop runtime libs)
         run: |
           set -euo pipefail
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
           echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list
           sudo apt-get update -q
-          sudo apt-get install -y -q clang-21 libglib2.0-dev pkg-config pulseaudio pulseaudio-utils iproute2
+          sudo apt-get install -y -q clang-21 libglib2.0-dev pkg-config pulseaudio pulseaudio-utils iproute2 \
+            xvfb xauth libxkbcommon-x11-0 libxkbcommon0 libgl1 libegl1 libgl1-mesa-dri libfontconfig1 \
+            libxcursor1 libxi6 libxrandr2 libwayland-client0 libwayland-egl1 libwayland-cursor0 bc
           clang++-21 --version
 
       - name: Rust toolchain (rust-toolchain.toml)
@@ -59,9 +61,9 @@ jobs:
       - name: cargo clippy -D warnings
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Build callxl-cli and test binaries
+      - name: Build callxl-cli, callxl (desktop) and test binaries
         run: |
-          cargo build -p callxl-cli
+          cargo build -p callxl-cli -p callxl-desktop
           cargo test --workspace --no-run
 
       - name: Unit tests
@@ -129,6 +131,65 @@ jobs:
           cargo test -p callxl-e2e --test loopback -- loopback_v4_lan_policy --nocapture
           kill "$player" || true
 
+      - name: Desktop gui_join (GUI joins a callxl-cli peer over real mDNS, under Xvfb)
+        env:
+          CALLXL_GUI_JOIN_AUDIO: "1"
+          CALLXL_E2E_ARTIFACTS: ${{ github.workspace }}/target/e2e-artifacts-gui
+        run: |
+          set -euo pipefail
+          # PulseAudio (started above) gives the GUI's platform audio device a null sink;
+          # speech into it so the GUI sends real audio back to the CLI peer.
+          wav="$(ls target/e2e-artifacts/assets/*.wav | head -1)"
+          ( while true; do paplay -d callxl_null "$wav" || break; done ) &
+          player=$!
+          apps/desktop/tests/gui_join.sh target/debug/callxl target/debug/callxl-cli
+          kill "$player" || true
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+
+      - name: Desktop release build (fat LTO), .deb, install, startup under 1 s
+        run: |
+          set -euo pipefail
+          t0=$(date +%s)
+          cargo build --release -p callxl-desktop
+          echo "release build: $(( $(date +%s) - t0 )) s"
+          cargo deb -p callxl-desktop --no-build
+          deb="$(ls target/debian/callxl_*_amd64.deb)"
+          echo "binary: $(stat -c %s target/release/callxl) bytes; package: $(stat -c %s "$deb") bytes ($deb)"
+          dpkg -I "$deb"
+          dpkg -c "$deb"
+          sudo apt-get install -y -q "./$deb"
+          dpkg -s callxl | grep -E '^(Version|Depends):'
+          desktop-file-validate /usr/share/applications/callxl.desktop 2>/dev/null || true
+          test -x /usr/bin/callxl
+          callxl --version
+          # §14: the app launches under 1 s (measured by the app itself from process
+          # start to: window shown + core started). Three launches: cold, then warm.
+          for i in 1 2 3; do
+            out="$(xvfb-run -a callxl --headless-smoke 2>/dev/null)"
+            echo "$out"
+            ms="$(echo "$out" | sed -n 's/^startup_ms=//p')"
+            echo "$out" | grep -qx ready
+            test -n "$ms" && test "$ms" -lt 1000
+          done
+
+      - name: Upload callxl .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: callxl-deb
+          path: target/debian/callxl_*_amd64.deb
+          if-no-files-found: error
+
+      - name: Upload desktop screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-screens
+          path: target/screens
+          if-no-files-found: warn
+
       - name: Upload callxl-cli
         if: always()
         uses: actions/upload-artifact@v4
@@ -145,18 +206,118 @@ jobs:
           path: |
             target/e2e-artifacts
             target/e2e-artifacts-pulse
+            target/e2e-artifacts-gui
+            !target/**/assets
+          if-no-files-found: warn
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      # MSVC (the workflow default is clang-21 for Linux); static CRT, no redistributables (§8).
+      CC: cl.exe
+      CXX: cl.exe
+      RUSTFLAGS: -C target-feature=+crt-static
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Cache prebuilt libwebrtc (${{ env.WEBRTC_TAG }})
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/callxl/${{ env.WEBRTC_TAG }}
+          key: libwebrtc-${{ env.WEBRTC_TAG }}-win-x64-release
+
+      - name: Fetch libwebrtc (no-op when cached)
+        run: scripts/ci-webrtc-cache.sh win-x64-release
+
+      - name: Build callxl-cli and test binaries
+        run: |
+          cargo build -p callxl-cli -p callxl-desktop
+          cargo test --workspace --no-run
+
+      - name: Unit tests
+        run: cargo test --workspace --exclude callxl-e2e
+
+      - name: Loopback e2e with the test ADM (127.0.0.1, LAN policy)
+        env:
+          CALLXL_E2E_ARTIFACTS: ${{ github.workspace }}/target/e2e-artifacts
+        run: |
+          export CALLXL_CLI="$PWD/target/debug/callxl-cli.exe"
+          cargo test -p callxl-e2e --test loopback -- loopback_v4_lan_policy --nocapture
+
+      - name: Release build (static CRT, fat LTO)
+        run: |
+          t0=$(date +%s)
+          cargo build --release -p callxl-desktop
+          echo "release build: $(( $(date +%s) - t0 )) s"
+          ls -l target/release/callxl.exe
+          target/release/callxl.exe --version
+          # Static CRT: no vcruntime/msvcp import.
+          if command -v dumpbin >/dev/null; then dumpbin //dependents target/release/callxl.exe; fi
+
+      - name: Inno Setup → CallXL-Setup.exe
+        run: |
+          set -euo pipefail
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          if [[ ! -x "$ISCC" ]]; then
+            choco install innosetup -y --no-progress
+          fi
+          ver="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="callxl-desktop") | .version')"
+          "$ISCC" //Qp "//DAppVersion=$ver" "//DBinDir=$(cygpath -w "$PWD/target/release")" \
+            "//DOutDir=$(cygpath -w "$PWD/target/installer")" packaging/windows/callxl.iss
+          ls -l target/installer/CallXL-Setup.exe
+
+      - name: Silent install / launch / uninstall smoke test
+        run: |
+          set -euo pipefail
+          target/installer/CallXL-Setup.exe //VERYSILENT //SUPPRESSMSGBOXES //NORESTART //LOG=install.log
+          app="$(cygpath -u "$LOCALAPPDATA")/Programs/CallXL"
+          ls -l "$app"
+          test -f "$app/callxl.exe"
+          lnk="$(cygpath -u "$APPDATA")/Microsoft/Windows/Start Menu/Programs/CallXL.lnk"
+          test -f "$lnk" && echo "Start menu shortcut: $lnk"
+          v="$("$app/callxl.exe" --version)"
+          echo "$v"
+          [[ "$v" == callxl* ]]
+          "$app/unins000.exe" //VERYSILENT //SUPPRESSMSGBOXES //NORESTART
+          # The uninstaller hands off to a temporary copy and returns at once: wait for it.
+          for _ in $(seq 60); do [[ -e "$app" ]] || break; sleep 1; done
+          if [[ -e "$app" ]]; then echo "install folder still present"; ls -la "$app"; exit 1; fi
+          [[ ! -e "$lnk" ]] || { echo "shortcut left behind"; exit 1; }
+          echo "uninstalled cleanly"
+
+      - name: Upload CallXL-Setup.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: CallXL-Setup
+          path: target/installer/CallXL-Setup.exe
+          if-no-files-found: error
+
+      - name: Upload Windows e2e logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-windows
+          path: |
+            target/e2e-artifacts
+            install.log
             !target/**/assets
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Phase 2 adds these jobs (placeholders, intentionally commented out):
-  #
-  # windows:
-  #   runs-on: windows-latest
-  #   steps: checkout · clang/MSVC toolchain · libwebrtc cache (win-x64-release) ·
-  #          cargo build (static CRT) · cargo test --workspace --exclude callxl-e2e ·
-  #          loopback e2e with the test ADM · Inno Setup → CallXL-Setup.exe ·
-  #          silent install/uninstall smoke test · upload CallXL-Setup.exe
+  # Phase 2 adds this job (placeholder, intentionally commented out):
   #
   # macos:
   #   runs-on: macos-latest
