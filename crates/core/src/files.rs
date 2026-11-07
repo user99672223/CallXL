@@ -438,6 +438,15 @@ impl Core {
         }
     }
 
+    /// An outgoing transfer is running over an internet path (audio-first throttle active).
+    pub fn throttled_sends(&self) -> bool {
+        self.transfers.map.iter().any(|(k, t)| {
+            k.2 == TransferDirection::Outgoing
+                && t.info.state == TransferState::Transferring
+                && self.links.get(&k.1).is_some_and(|l| l.path_kind.is_some_and(|p| p.is_internet()))
+        })
+    }
+
     /// Sends as many chunks as the window (≤ 1 MiB unacknowledged), the SCTP buffer and,
     /// on internet paths, the audio-first throttle allow. `id` "" = all transfers to `key`.
     pub fn pump_file(&mut self, key: &str, id: &str) {

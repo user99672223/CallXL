@@ -205,7 +205,12 @@ impl Core {
         self.publish();
         let mut tick = tokio::time::interval(Duration::from_millis(250));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Paces throttled (internet-path) file sends: the token bucket refills continuously
+        // but is only drained when chunks are pumped. Armed only while such a send runs.
+        let mut pace = tokio::time::interval(Duration::from_millis(20));
+        pace.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
+            let pacing = self.throttled_sends();
             tokio::select! {
                 Some(cmd) = cmd_rx.recv() => {
                     if let Command::Stop(reply) = cmd {
@@ -221,6 +226,11 @@ impl Core {
                 Some(ev) = disc_rx.recv() => self.on_discovery(ev),
                 Some((session, ev)) = cloud_rx.recv() => self.on_cloud(session, ev).await,
                 _ = tick.tick() => self.on_tick().await,
+                _ = pace.tick(), if pacing => {
+                    for key in self.links.keys().cloned().collect::<Vec<_>>() {
+                        self.pump_file(&key, "");
+                    }
+                }
                 else => return,
             }
         }

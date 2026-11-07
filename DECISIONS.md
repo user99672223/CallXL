@@ -201,3 +201,12 @@ D-0026 (2026-11-07, phase1) — The ICE controller keeps its own recheck chain a
 the first selection on (500 ms). In a stable call libwebrtc requests no sorts, so the
 CallXL switching policy was never evaluated: CI run 42340608231 showed no controller
 decision in 12 s with the selected IPv6 pair at 120 ms RTT and IPv4 at ~0 ms.
+
+D-0027 (2026-11-07, phase1) — Throttled (internet-path) file sends are paced by a 20 ms
+tick that is armed only while such a send runs. The token bucket's burst cap is 100 ms of
+allowance, but it was drained only on the 250 ms core tick and on each 256 KiB ack, so
+part of the allowance expired unused. Measured on `file_transfer_throttle_keeps_audio_loss_flat`
+(proxy backend, 2 Mbit/s, 20 ms, one run each): 4 MiB goodput 578 → 633 kbps, audio loss
+0.00 % both times, audio send avg 279.7 → 282.0 kbps. The rest of the gap to the link rate
+is the throttle's RTT rule (halve when RTT > 1.5× its 10 s baseline), i.e. audio first by
+design. The burst cap stays at 100 ms (no larger bursts into a shallow bottleneck queue).
