@@ -31,6 +31,22 @@ When this file is silent, decide using the Philosophy section, record the decisi
 6. **Autonomous.** Agents make decisions, log them, and keep going until the Definition
    of Done is met. Problems are solved by adjusting the approach, never by lowering the
    quality bar or asking the user.
+7. **Evidence over assumption.** Model knowledge is the starting point; what the hardware
+   and CI actually do is definitive. Any claim about behaviour — a bitrate is reached, a
+   frame size is in use, a field trial takes effect, a path switch happens, a build is
+   faster — must be backed by concrete proof: a stats snapshot, a test output, a CI run
+   URL, a timing number. Log that proof in the PR description and, when it changes a
+   design choice, in `DECISIONS.md`. Never write "should work" or "verified" without the
+   artifact that shows it. *But be reasonable about it:* prove each thing once, well, then
+   trust it. Do not re-run, re-check, or add redundant tests for things already proven;
+   do not loop on verification for its own sake. One decisive test beats five vague ones.
+   If something cannot be proven in CI (real-network behaviour), say exactly that in
+   `HANDOFF.md` rather than implying it was tested. *Hunt for smart optimisations:*
+   actively look for tricks, shortcuts and workarounds that make things faster, smaller
+   or more robust — build caching, cheaper code paths, better defaults, binding glue that
+   avoids copies, CI parallelism — and adopt them when the evidence shows they help with
+   zero loss of quality. Every optimisation gets a before/after number logged next to it.
+   If a trick costs quality or stability in any measurable way, reject it and note why.
 
 ---
 
