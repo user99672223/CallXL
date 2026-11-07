@@ -56,7 +56,10 @@ struct Observer {
 
 impl dcm::DataChannelObserver for Observer {
     fn on_state_change(&self, state: DataState) {
-        push(&self.tx, MediaEvent::Data { peer: self.peer, channel: self.channel, event: DataChannelEvent::State(state) });
+        push(
+            &self.tx,
+            MediaEvent::Data { peer: self.peer, channel: self.channel, event: DataChannelEvent::State(state) },
+        );
     }
     fn on_message(&self, data: &[u8], binary: bool) {
         push(

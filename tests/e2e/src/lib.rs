@@ -47,6 +47,12 @@ pub fn ipv6_or_skip(test: &str) -> bool {
     ok
 }
 
+/// `CALLXL_E2E_ADM=platform`: use the OS audio stack (CI: PulseAudio null sink) instead of
+/// the WAV test ADM. Recordings are then unavailable and continuity checks are skipped.
+pub fn platform_adm() -> bool {
+    std::env::var("CALLXL_E2E_ADM").is_ok_and(|v| v == "platform")
+}
+
 pub struct Harness {
     pub name: String,
     pub dir: PathBuf,
@@ -151,7 +157,11 @@ impl Peer {
             .arg("--name")
             .arg(&o.name)
             .arg("--adm")
-            .arg(format!("test:play={},record={}", h.wav[o.wav].display(), record.display()))
+            .arg(if platform_adm() {
+                "platform".to_string()
+            } else {
+                format!("test:play={},record={}", h.wav[o.wav].display(), record.display())
+            })
             .arg("--log")
             .arg("info");
         for b in &o.bind {
@@ -202,10 +212,10 @@ impl Peer {
                     if v["event"] != "StatsTick" {
                         e2.lock().unwrap().push((Instant::now(), v));
                     }
-                } else if let Some(id) = v.get("id").and_then(Value::as_u64) {
-                    if let Some(tx) = p2.lock().unwrap().remove(&id) {
-                        let _ = tx.send(v);
-                    }
+                } else if let Some(id) = v.get("id").and_then(Value::as_u64)
+                    && let Some(tx) = p2.lock().unwrap().remove(&id)
+                {
+                    let _ = tx.send(v);
                 }
             }
         });
@@ -273,10 +283,10 @@ impl Peer {
         let deadline = Instant::now() + timeout;
         loop {
             let d = self.diagnostics().await?;
-            if let Some(p) = d["peers"].get(0) {
-                if pred(p) {
-                    return Ok(p.clone());
-                }
+            if let Some(p) = d["peers"].get(0)
+                && pred(p)
+            {
+                return Ok(p.clone());
             }
             if Instant::now() > deadline {
                 bail!("{}: stats condition not met within {timeout:?}; last: {}", self.name, d["peers"]);
@@ -289,7 +299,8 @@ impl Peer {
         let deadline = Instant::now() + timeout;
         loop {
             let s = self.snapshot().await?;
-            let peers_ok = s["peers"].as_array().is_some_and(|p| !p.is_empty() && p.iter().all(|x| x["connected"] == true));
+            let peers_ok =
+                s["peers"].as_array().is_some_and(|p| !p.is_empty() && p.iter().all(|x| x["connected"] == true));
             if s["call_state"] == "InCall" && peers_ok {
                 return Ok(());
             }
@@ -392,6 +403,10 @@ pub async fn aec_off(p: &Peer) -> Result<()> {
 
 /// Asserts the last `tail_secs` of the far-end recording at `path` have no gap > 20 ms.
 pub fn assert_continuous_tail(path: &Path, tail_secs: f64) -> Result<audio::Continuity> {
+    if platform_adm() {
+        eprintln!("platform ADM: no recording, continuity not measured");
+        return Ok(audio::Continuity { active_secs: 0.0, longest_gap_ms: 0.0, gaps_over_20ms: 0, median_rms: 0.0 });
+    }
     let s = audio::read_wav(path)?;
     let keep = (tail_secs * f64::from(audio::RATE)) as usize;
     let start = s.len().saturating_sub(keep);
@@ -405,6 +420,10 @@ pub fn assert_continuous_tail(path: &Path, tail_secs: f64) -> Result<audio::Cont
 
 /// Asserts the far-end recording at `path` has no gap > 20 ms; returns the analysis.
 pub fn assert_continuous(path: &Path) -> Result<audio::Continuity> {
+    if platform_adm() {
+        eprintln!("platform ADM: no recording, continuity not measured");
+        return Ok(audio::Continuity { active_secs: 0.0, longest_gap_ms: 0.0, gaps_over_20ms: 0, median_rms: 0.0 });
+    }
     let s = audio::read_wav(path)?;
     let c = audio::continuity(&s);
     eprintln!("continuity {}: {c:?}", path.display());

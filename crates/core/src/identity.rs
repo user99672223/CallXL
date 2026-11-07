@@ -50,32 +50,28 @@ pub fn load_or_create(data_dir: &Path, headless: bool, reset: bool) -> Identity 
     let use_keyring = !headless;
     if reset {
         let _ = std::fs::remove_file(file_path(data_dir));
-        if use_keyring {
-            if let Some(e) = keyring_entry(data_dir) {
-                let _ = e.delete_credential();
-            }
+        if use_keyring && let Some(e) = keyring_entry(data_dir) {
+            let _ = e.delete_credential();
         }
     }
-    if use_keyring {
-        if let Some(e) = keyring_entry(data_dir) {
-            match e.get_secret() {
-                Ok(b) => {
-                    if let Some(id) = Identity::from_secret_bytes(&b) {
-                        return id;
-                    }
-                }
-                Err(keyring::Error::NoEntry) => {
-                    let id = read_file(data_dir).unwrap_or_else(Identity::generate);
-                    if e.set_secret(&id.secret_bytes()).is_ok() {
-                        let _ = std::fs::remove_file(file_path(data_dir));
-                        return id;
-                    }
-                    tracing::warn!("OS keystore unavailable; keeping identity in the data directory");
-                    let _ = write_file(data_dir, &id);
+    if use_keyring && let Some(e) = keyring_entry(data_dir) {
+        match e.get_secret() {
+            Ok(b) => {
+                if let Some(id) = Identity::from_secret_bytes(&b) {
                     return id;
                 }
-                Err(err) => tracing::warn!("OS keystore unavailable ({err}); using the data directory"),
             }
+            Err(keyring::Error::NoEntry) => {
+                let id = read_file(data_dir).unwrap_or_else(Identity::generate);
+                if e.set_secret(&id.secret_bytes()).is_ok() {
+                    let _ = std::fs::remove_file(file_path(data_dir));
+                    return id;
+                }
+                tracing::warn!("OS keystore unavailable; keeping identity in the data directory");
+                let _ = write_file(data_dir, &id);
+                return id;
+            }
+            Err(err) => tracing::warn!("OS keystore unavailable ({err}); using the data directory"),
         }
     }
     if let Some(id) = read_file(data_dir) {

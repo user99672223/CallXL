@@ -10,9 +10,10 @@ use tokio::net::TcpStream;
 pub async fn register(relay: SocketAddr, address: &str, port: u16) -> std::io::Result<SocketAddr> {
     let fut = async {
         let mut s = TcpStream::connect(relay).await?;
-        let target: SocketAddr = format!("{}:{port}", if address.contains(':') { format!("[{address}]") } else { address.to_string() })
-            .parse()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{e}")))?;
+        let target: SocketAddr =
+            format!("{}:{port}", if address.contains(':') { format!("[{address}]") } else { address.to_string() })
+                .parse()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{e}")))?;
         s.write_all(format!("{{\"register\":\"{target}\"}}\n").as_bytes()).await?;
         let mut line = String::new();
         BufReader::new(s).read_line(&mut line).await?;

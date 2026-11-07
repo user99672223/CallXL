@@ -192,7 +192,9 @@ impl Relay {
                         return;
                     }
                     let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
-                    let Some(target) = v.get("register").and_then(|t| t.as_str()).and_then(|t| t.parse::<SocketAddr>().ok()) else {
+                    let Some(target) =
+                        v.get("register").and_then(|t| t.as_str()).and_then(|t| t.parse::<SocketAddr>().ok())
+                    else {
                         return;
                     };
                     match register(&sh, target).await {

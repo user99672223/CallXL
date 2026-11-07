@@ -65,7 +65,8 @@ impl LanSignaling {
                     let _ = me.inner.events.send(LanEvent::Closed { conn: id, reason: e.to_string() }).await;
                 }
                 Err(_) => {
-                    let _ = me.inner.events.send(LanEvent::Closed { conn: id, reason: "connect timed out".into() }).await;
+                    let _ =
+                        me.inner.events.send(LanEvent::Closed { conn: id, reason: "connect timed out".into() }).await;
                 }
             }
         });

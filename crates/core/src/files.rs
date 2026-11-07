@@ -21,6 +21,7 @@ const ACK_EVERY: u64 = 256 * 1024;
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)] // variant names are the wire tags (file_offer, ...)
 enum Ctl {
     FileOffer { id: TransferId, name: String, size: u64, hash: String, session: SessionId },
     FileAccept { id: TransferId, offset: u64 },
@@ -41,7 +42,14 @@ pub struct Transfer {
 
 impl Transfer {
     fn new(info: TransferInfo) -> Self {
-        Self { info, file: None, sent: 0, acked: 0, last_ack_sent: 0, last_emit: Instant::now() - Duration::from_secs(1) }
+        Self {
+            info,
+            file: None,
+            sent: 0,
+            acked: 0,
+            last_ack_sent: 0,
+            last_emit: Instant::now() - Duration::from_secs(1),
+        }
     }
 }
 
@@ -186,7 +194,16 @@ impl Core {
             };
             let k = (id.clone(), r.clone(), TransferDirection::Outgoing);
             self.transfers.map.insert(k.clone(), Transfer::new(info));
-            self.ctl(&r, &Ctl::FileOffer { id: id.clone(), name: name.clone(), size, hash: hash.clone(), session: session.clone() });
+            self.ctl(
+                &r,
+                &Ctl::FileOffer {
+                    id: id.clone(),
+                    name: name.clone(),
+                    size,
+                    hash: hash.clone(),
+                    session: session.clone(),
+                },
+            );
             self.progress(&k, true);
         }
         self.publish();
@@ -205,7 +222,10 @@ impl Core {
             .filter(|(k, t)| {
                 k.1 == key
                     && k.2 == TransferDirection::Outgoing
-                    && matches!(t.info.state, TransferState::Paused | TransferState::Accepted | TransferState::Transferring)
+                    && matches!(
+                        t.info.state,
+                        TransferState::Paused | TransferState::Accepted | TransferState::Transferring
+                    )
             })
             .map(|(k, _)| k.clone())
             .collect();
@@ -232,23 +252,18 @@ impl Core {
     pub fn pause_transfers_for(&mut self, key: &str) {
         let ks: Vec<Key> = self.transfers.map.keys().filter(|k| k.1 == key).cloned().collect();
         for k in ks {
-            if let Some(t) = self.transfers.map.get_mut(&k) {
-                if matches!(t.info.state, TransferState::Transferring | TransferState::Accepted) {
-                    t.info.state = TransferState::Paused;
-                    t.file = None;
-                    self.progress(&k, true);
-                }
+            if let Some(t) = self.transfers.map.get_mut(&k)
+                && matches!(t.info.state, TransferState::Transferring | TransferState::Accepted)
+            {
+                t.info.state = TransferState::Paused;
+                t.file = None;
+                self.progress(&k, true);
             }
         }
     }
 
     pub fn respond_file(&mut self, id: &str, accept: bool) {
-        let Some(k) = self
-            .transfers
-            .map
-            .keys()
-            .find(|k| k.0 == id && k.2 == TransferDirection::Incoming)
-            .cloned()
+        let Some(k) = self.transfers.map.keys().find(|k| k.0 == id && k.2 == TransferDirection::Incoming).cloned()
         else {
             self.error("that file offer no longer exists");
             return;
@@ -301,10 +316,10 @@ impl Core {
                 t.info.state = TransferState::Cancelled;
                 t.file = None;
             }
-            if let Some(l) = self.links.get_mut(&k.1) {
-                if let Some(dc) = l.file_channels.remove(&k.0) {
-                    dc.close();
-                }
+            if let Some(l) = self.links.get_mut(&k.1)
+                && let Some(dc) = l.file_channels.remove(&k.0)
+            {
+                dc.close();
             }
             self.ctl(&k.1, &Ctl::FileCancel { id: k.0.clone() });
             self.progress(&k, true);
@@ -318,7 +333,10 @@ impl Core {
                 let k = (id.clone(), key.to_string(), TransferDirection::Incoming);
                 if let Some(t) = self.transfers.map.get(&k) {
                     // Resume: this offer was accepted before; continue from what we have.
-                    if matches!(t.info.state, TransferState::Paused | TransferState::Accepted | TransferState::Transferring) {
+                    if matches!(
+                        t.info.state,
+                        TransferState::Paused | TransferState::Accepted | TransferState::Transferring
+                    ) {
                         tracing::info!("resuming {name} from {}", short(key));
                         self.accept_incoming(&k, true);
                     }
@@ -400,10 +418,10 @@ impl Core {
                     t.info.bytes_done = if ok { t.info.size } else { t.info.bytes_done };
                     t.file = None;
                 }
-                if let Some(l) = self.links.get_mut(key) {
-                    if let Some(dc) = l.file_channels.remove(&id) {
-                        dc.close();
-                    }
+                if let Some(l) = self.links.get_mut(key)
+                    && let Some(dc) = l.file_channels.remove(&id)
+                {
+                    dc.close();
                 }
                 self.progress(&k, true);
             }
@@ -428,7 +446,10 @@ impl Core {
             .map
             .iter()
             .filter(|(k, t)| {
-                k.1 == key && k.2 == TransferDirection::Outgoing && t.info.state == TransferState::Transferring && (id.is_empty() || k.0 == id)
+                k.1 == key
+                    && k.2 == TransferDirection::Outgoing
+                    && t.info.state == TransferState::Transferring
+                    && (id.is_empty() || k.0 == id)
             })
             .map(|(k, _)| k.0.clone())
             .collect();

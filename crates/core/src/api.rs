@@ -53,7 +53,11 @@ fn default_settings(config: &AppConfig) -> Settings {
         display_name: config.device_name.clone(),
         signaling_url: config.signaling_url.clone(),
         effective_signaling_url: config.signaling_url.clone().unwrap_or_else(|| config::DEFAULT_SIGNALING_URL.into()),
-        download_dir: if config.download_dir.is_empty() { config::default_download_dir() } else { config.download_dir.clone() },
+        download_dir: if config.download_dir.is_empty() {
+            config::default_download_dir()
+        } else {
+            config.download_dir.clone()
+        },
         bitrate_ceiling_kbps: config::MAX_CEILING_KBPS,
         apm: ApmConfig::default(),
         raw_mic: false,
@@ -133,8 +137,10 @@ impl CallXl {
         }));
         let id = identity::load_or_create(&data_dir, config.headless, dev.reset_identity);
         let crypto = Arc::new(SignalCrypto::new(id));
-        let mut settings: Settings =
-            store.get("settings").and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_else(|| default_settings(&config));
+        let mut settings: Settings = store
+            .get("settings")
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_else(|| default_settings(&config));
         if !config.device_name.is_empty() && store.get("settings").is_none() {
             settings.display_name = config.device_name.clone();
         }
@@ -241,7 +247,7 @@ impl CallXl {
                 ),
                 ..Default::default()
             })
-                .map_err(|e| e.to_string())?,
+            .map_err(|e| e.to_string())?,
         );
         let mic = engine.create_audio_track(settings.apm.to_media()).map_err(|e| e.to_string())?;
         let _ = self.engine.set(engine.clone());
@@ -274,7 +280,7 @@ impl CallXl {
             let (lan_tx, lan_rx) = mpsc::channel(1024);
             let (disc_tx, disc_rx) = mpsc::channel(64);
             let (cloud_tx, cloud_rx) = mpsc::channel(1024);
-            let (lan, discovery) = start_lan(&dev, &crypto, &settings.display_name, lan_tx.clone(), disc_tx).await;
+            let (lan, discovery) = start_lan(&dev, &crypto, &settings.display_name, lan_tx, disc_tx).await;
             let lan_addr = lan.as_ref().map(|l| l.local_addr());
             let (views_tx, views_rx) = watch::channel(diag::DiagInputs::default());
             diag::spawn(engine.clone(), views_rx, internal_tx.clone());
@@ -291,7 +297,6 @@ impl CallXl {
                 muted: false,
                 media_tx,
                 internal_tx,
-                lan_tx,
                 lan,
                 discovery,
                 lan_conn_keys: Default::default(),
@@ -404,7 +409,11 @@ impl CallXl {
         e.audio_devices()
             .into_iter()
             .map(|d| {
-                let first = if d.input { !std::mem::replace(&mut seen_in, true) } else { !std::mem::replace(&mut seen_out, true) };
+                let first = if d.input {
+                    !std::mem::replace(&mut seen_in, true)
+                } else {
+                    !std::mem::replace(&mut seen_out, true)
+                };
                 AudioDevice {
                     kind: if d.input { AudioDeviceKind::Input } else { AudioDeviceKind::Output },
                     id: d.id,
@@ -488,6 +497,7 @@ impl CallXl {
             "version": env!("CARGO_PKG_VERSION"),
             "generated_ms": callxl_signal::now_ms(),
             "dev_app_secret": config::app_secret_is_dev(),
+            "data_dir": self.config.data_dir,
             "diagnostics": self.diagnostics(),
             "state": {
                 "device": snap.device,

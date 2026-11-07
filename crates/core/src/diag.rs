@@ -84,7 +84,11 @@ impl CpuMeter {
                 let p = e.path();
                 let comm = std::fs::read_to_string(p.join("comm")).unwrap_or_default();
                 let comm = comm.trim();
-                if comm.starts_with("tokio") || comm.starts_with("callxl-cli") || comm.starts_with("callxl-core") || comm == "callxl-mdns" {
+                if comm.starts_with("tokio")
+                    || comm.starts_with("callxl-cli")
+                    || comm.starts_with("callxl-core")
+                    || comm == "callxl-mdns"
+                {
                     continue;
                 }
                 if let Ok(stat) = std::fs::read_to_string(p.join("stat")) {

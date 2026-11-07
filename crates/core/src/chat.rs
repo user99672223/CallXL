@@ -66,7 +66,8 @@ impl Core {
                 };
                 self.store.save_message(&msg);
                 self.emit(Event::ChatReceived { message: msg });
-                let receipt = serde_json::to_vec(&Wire::Receipt { id, status: ReceiptStatus::Delivered }).unwrap_or_default();
+                let receipt =
+                    serde_json::to_vec(&Wire::Receipt { id, status: ReceiptStatus::Delivered }).unwrap_or_default();
                 if let Some(l) = self.links.get_mut(key) {
                     l.send_chat(receipt);
                 }
@@ -88,7 +89,8 @@ impl Core {
         let history = self.store.history(&target.session, 10_000, None);
         for m in history.into_iter().filter(|m| !m.own && m.ts_ms <= target.ts_ms && m.status != ReceiptStatus::Read) {
             self.store.set_status(&m.id, ReceiptStatus::Read);
-            let receipt = serde_json::to_vec(&Wire::Receipt { id: m.id.clone(), status: ReceiptStatus::Read }).unwrap_or_default();
+            let receipt = serde_json::to_vec(&Wire::Receipt { id: m.id.clone(), status: ReceiptStatus::Read })
+                .unwrap_or_default();
             if let Some(l) = self.links.get_mut(&m.sender_key) {
                 l.send_chat(receipt);
             }

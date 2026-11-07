@@ -51,8 +51,7 @@ impl Discovery {
         let host = format!("{instance}.local.");
         let props = [("k", me.key.as_str()), ("x", me.agree_pk.as_str()), ("n", me.name.as_str()), ("v", "1")];
         let info = if me.addrs.is_empty() {
-            ServiceInfo::new(SERVICE_TYPE, &instance, &host, "", me.port, &props[..])
-                .map(|i| i.enable_addr_auto())
+            ServiceInfo::new(SERVICE_TYPE, &instance, &host, "", me.port, &props[..]).map(|i| i.enable_addr_auto())
         } else {
             ServiceInfo::new(SERVICE_TYPE, &instance, &host, &me.addrs[..], me.port, &props[..])
         }

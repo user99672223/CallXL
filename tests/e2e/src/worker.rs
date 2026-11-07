@@ -27,7 +27,15 @@ impl LocalWorker {
         let log = std::fs::File::create(log)?;
         let child = Command::new(wrangler)
             .current_dir(&dir)
-            .args(["dev", "--local", "--ip", "127.0.0.1", "--port", &port.to_string(), "--show-interactive-dev-session=false"])
+            .args([
+                "dev",
+                "--local",
+                "--ip",
+                "127.0.0.1",
+                "--port",
+                &port.to_string(),
+                "--show-interactive-dev-session=false",
+            ])
             .args(["--var", &format!("APP_SECRET:{app_secret}"), "--var", "TOKEN_SIGNING_KEY:e2e-signing-key"])
             .env("WRANGLER_SEND_METRICS", "false")
             .env("CI", "true")

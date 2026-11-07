@@ -56,7 +56,8 @@ pub fn apply_opus_profile(sdp: &str, max_bitrate_bps: u32) -> String {
                 // m=audio <port> <proto> <pt...>
                 let parts: Vec<&str> = l.split(' ').collect();
                 if parts.len() > 3 {
-                    let mut pts: Vec<&str> = parts[3..].iter().copied().filter(|p| !red_pts.iter().any(|r| r == p)).collect();
+                    let mut pts: Vec<&str> =
+                        parts[3..].iter().copied().filter(|p| !red_pts.iter().any(|r| r == p)).collect();
                     pts.sort_by_key(|p| if opus_pts.iter().any(|o| o == p) { 0 } else { 1 });
                     out.push(format!("{} {} {} {}", parts[0], parts[1], parts[2], pts.join(" ")));
                     continue;
@@ -69,9 +70,8 @@ pub fn apply_opus_profile(sdp: &str, max_bitrate_bps: u32) -> String {
             if l.starts_with("a=ptime:") || l.starts_with("a=maxptime:") {
                 continue;
             }
-            let pt = payload_of(l, "a=rtpmap:")
-                .or_else(|| payload_of(l, "a=fmtp:"))
-                .or_else(|| payload_of(l, "a=rtcp-fb:"));
+            let pt =
+                payload_of(l, "a=rtpmap:").or_else(|| payload_of(l, "a=fmtp:")).or_else(|| payload_of(l, "a=rtcp-fb:"));
             if let Some(pt) = pt {
                 if red_pts.iter().any(|r| r == pt) {
                     continue;
@@ -81,10 +81,10 @@ pub fn apply_opus_profile(sdp: &str, max_bitrate_bps: u32) -> String {
                 }
             }
             out.push(l.to_string());
-            if let Some(pt) = payload_of(l, "a=rtpmap:") {
-                if opus_pts.iter().any(|o| o == pt) {
-                    out.push(format!("a=fmtp:{pt} {fmtp}"));
-                }
+            if let Some(pt) = payload_of(l, "a=rtpmap:")
+                && opus_pts.iter().any(|o| o == pt)
+            {
+                out.push(format!("a=fmtp:{pt} {fmtp}"));
             }
             continue;
         }

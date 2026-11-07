@@ -78,7 +78,9 @@ pub async fn fetch_token(signaling_url: &str, app_secret: &str) -> Result<TokenR
 #[derive(Debug)]
 pub enum LinkEvent {
     Connected,
-    Disconnected { reason: String },
+    Disconnected {
+        reason: String,
+    },
     Frame(Vec<u8>),
     /// WebSocket ping round trip.
     Latency(Duration),

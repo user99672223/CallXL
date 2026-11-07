@@ -76,11 +76,24 @@ pub(crate) enum Command {
 
 /// Messages the core sends itself (timers, background results).
 pub(crate) enum Internal {
-    SendCandidate { key: PeerKey, peer: PeerId, mid: String, mline: i32, candidate: String },
+    SendCandidate {
+        key: PeerKey,
+        peer: PeerId,
+        mid: String,
+        mline: i32,
+        candidate: String,
+    },
     Stats(DiagnosticsSnapshot),
     TurnBytes(u64),
     Token(Option<TokenResponse>),
-    HashDone { id: TransferId, path: String, name: String, size: u64, hash: Result<String, String>, recipients: Vec<PeerKey> },
+    HashDone {
+        id: TransferId,
+        path: String,
+        name: String,
+        size: u64,
+        hash: Result<String, String>,
+        recipients: Vec<PeerKey>,
+    },
 }
 
 pub(crate) struct PeerEntry {
@@ -120,7 +133,6 @@ pub(crate) struct Core {
     pub muted: bool,
     pub media_tx: mpsc::Sender<MediaEvent>,
     pub internal_tx: mpsc::UnboundedSender<Internal>,
-    pub lan_tx: mpsc::Sender<LanEvent>,
     pub lan: Option<LanSignaling>,
     pub discovery: Option<Discovery>,
     pub lan_conn_keys: HashMap<ConnId, PeerKey>,
@@ -144,9 +156,8 @@ pub(crate) struct Core {
     pub dialing: HashMap<PeerKey, Instant>,
 }
 
-pub(crate) type UrlFn = Arc<
-    dyn Fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send>> + Send + Sync,
->;
+pub(crate) type UrlFn =
+    Arc<dyn Fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send>> + Send + Sync>;
 
 impl Core {
     pub fn emit(&self, e: Event) {
@@ -236,16 +247,16 @@ impl Core {
             Command::Trust(key) => self.trust(&key, true),
             Command::Untrust(key) => self.trust(&key, false),
             Command::CreateSession { id, name } => {
-                if let Some(c) = &self.cloud {
-                    if let Ok(env) = self.crypto.seal(
+                if let Some(c) = &self.cloud
+                    && let Ok(env) = self.crypto.seal(
                         Kind::SessionCreate,
                         None,
                         Some(&id),
                         None,
                         &schema::encode(&SessionRef { id: id.clone(), name: name.clone() }),
-                    ) {
-                        c.lobby.send(env.to_bytes());
-                    }
+                    )
+                {
+                    c.lobby.send(env.to_bytes());
                 }
                 self.join(id, name).await;
             }
@@ -457,7 +468,12 @@ impl Core {
             Some(s) => {
                 let mut members: BTreeSet<String> = self.members_of(&s.id);
                 members.insert(self.my_key());
-                vec![SessionInfo { id: s.id.clone(), name: s.name.clone(), members: members.into_iter().collect(), created_ms: s.created_ms }]
+                vec![SessionInfo {
+                    id: s.id.clone(),
+                    name: s.name.clone(),
+                    members: members.into_iter().collect(),
+                    created_ms: s.created_ms,
+                }]
             }
             None => Vec::new(),
         }
@@ -469,8 +485,7 @@ impl Core {
         self.dir
             .iter()
             .filter(|(k, e)| {
-                **k != me
-                    && (e.lan_sessions.iter().any(|s| s.id == sid) || e.cloud_sessions.contains(sid))
+                **k != me && (e.lan_sessions.iter().any(|s| s.id == sid) || e.cloud_sessions.contains(sid))
             })
             .map(|(k, _)| k.clone())
             .collect()
@@ -484,7 +499,7 @@ impl Core {
             }
             me.dir.get(k).map(|e| e.card.name.clone()).unwrap_or_else(|| k[..k.len().min(8)].to_string())
         };
-        let mut add = |info: &SessionInfo, lan: bool, cloud: bool, me: &Core, map: &mut HashMap<String, SessionSummary>| {
+        let add = |info: &SessionInfo, lan: bool, cloud: bool, me: &Core, map: &mut HashMap<String, SessionSummary>| {
             let entry = map.entry(info.id.clone()).or_insert_with(|| SessionSummary {
                 id: info.id.clone(),
                 name: info.name.clone(),
@@ -543,7 +558,13 @@ impl Core {
             self.drop_link(&k, reason);
         }
         if let Some(c) = &mut self.cloud {
-            if let Ok(env) = self.crypto.seal(Kind::SessionLeave, None, Some(&s.id), None, &schema::encode(&SessionRef { id: s.id.clone(), name: None })) {
+            if let Ok(env) = self.crypto.seal(
+                Kind::SessionLeave,
+                None,
+                Some(&s.id),
+                None,
+                &schema::encode(&SessionRef { id: s.id.clone(), name: None }),
+            ) {
                 c.lobby.send(env.to_bytes());
             }
             c.session = None;
@@ -624,12 +645,11 @@ impl Core {
                 lan.send(*conn, b.clone());
             }
         }
-        if let Some(c) = &self.cloud {
-            if let Some((sid, link)) = &c.session {
-                if let Some(b) = self.hello_bytes(false, Some(sid)) {
-                    link.send(b);
-                }
-            }
+        if let Some(c) = &self.cloud
+            && let Some((sid, link)) = &c.session
+            && let Some(b) = self.hello_bytes(false, Some(sid))
+        {
+            link.send(b);
         }
     }
 
@@ -649,16 +669,16 @@ impl Core {
             }
         };
         let bytes = env.to_bytes();
-        if let (Some(conn), Some(lan)) = (entry.lan_conn, &self.lan) {
-            if lan.send(conn, bytes.clone()) {
-                return true;
-            }
+        if let (Some(conn), Some(lan)) = (entry.lan_conn, &self.lan)
+            && lan.send(conn, bytes.clone())
+        {
+            return true;
         }
-        if let Some(c) = &self.cloud {
-            if let Some((_, link)) = &c.session {
-                link.send(bytes);
-                return true;
-            }
+        if let Some(c) = &self.cloud
+            && let Some((_, link)) = &c.session
+        {
+            link.send(bytes);
+            return true;
         }
         tracing::debug!("no route to {} for {kind:?}", &key[..8]);
         false
@@ -761,22 +781,20 @@ impl Core {
         if let Some(conn) = lan_conn {
             entry.lan_conn = Some(conn);
             entry.lan_sessions = h.sessions.clone();
-            if !h.reply {
-                if let Some(t) = entry.last_hello_sent.take() {
-                    entry.lan_latency_ms = Some(t.elapsed().as_secs_f64() * 1000.0);
-                }
+            if !h.reply
+                && let Some(t) = entry.last_hello_sent.take()
+            {
+                entry.lan_latency_ms = Some(t.elapsed().as_secs_f64() * 1000.0);
             }
             self.lan_conn_keys.insert(conn, key.clone());
         }
-        if via_session {
-            if let Some(sid) = env.sid.clone() {
-                entry.cloud_sessions.insert(sid);
-            }
+        if via_session && let Some(sid) = env.sid.clone() {
+            entry.cloud_sessions.insert(sid);
         }
-        if h.reply {
-            if let (Some(conn), Some(lan), Some(b)) = (lan_conn, &self.lan, self.hello_bytes(false, None)) {
-                lan.send(conn, b);
-            }
+        if h.reply
+            && let (Some(conn), Some(lan), Some(b)) = (lan_conn, &self.lan, self.hello_bytes(false, None))
+        {
+            lan.send(conn, b);
         }
         self.maybe_prompt(&h.card);
         self.reconcile().await;
@@ -828,12 +846,12 @@ impl Core {
             LanEvent::Closed { conn, .. } => {
                 if let Some(key) = self.lan_conn_keys.remove(&conn) {
                     let mut gone = false;
-                    if let Some(e) = self.dir.get_mut(&key) {
-                        if e.lan_conn == Some(conn) {
-                            e.lan_conn = None;
-                            e.lan_sessions.clear();
-                            gone = e.cloud_sessions.is_empty();
-                        }
+                    if let Some(e) = self.dir.get_mut(&key)
+                        && e.lan_conn == Some(conn)
+                    {
+                        e.lan_conn = None;
+                        e.lan_sessions.clear();
+                        gone = e.cloud_sessions.is_empty();
                     }
                     if gone {
                         // Keep the link if media is still up (signaling loss never touches media);
@@ -933,7 +951,14 @@ impl Core {
             .collect();
         let f = mk_url.clone();
         let lobby = WsLink::spawn(move || f("/ws".to_string()), list, tx);
-        self.cloud = Some(Cloud { lobby, session: None, connected: false, session_connected: false, latency_ms: None, token: None });
+        self.cloud = Some(Cloud {
+            lobby,
+            session: None,
+            connected: false,
+            session_connected: false,
+            latency_ms: None,
+            token: None,
+        });
         let url_fn: UrlFn = Arc::new(move |p: String| Box::pin(mk_url(p)));
         self.cloud_url_fn = Some(url_fn);
     }
@@ -953,7 +978,13 @@ impl Core {
         let path = format!("/session/{sid}/ws");
         let link = WsLink::spawn(move || f(path.clone()), vec![hello], tx);
         if let Some(c) = &mut self.cloud {
-            if let Ok(env) = self.crypto.seal(Kind::SessionJoin, None, Some(sid), None, &schema::encode(&SessionRef { id: sid.to_string(), name: None })) {
+            if let Ok(env) = self.crypto.seal(
+                Kind::SessionJoin,
+                None,
+                Some(sid),
+                None,
+                &schema::encode(&SessionRef { id: sid.to_string(), name: None }),
+            ) {
                 c.lobby.send(env.to_bytes());
             }
             c.session = Some((sid.to_string(), link));
@@ -998,7 +1029,11 @@ impl Core {
         match i {
             Internal::SendCandidate { key, peer, mid, mline, candidate } => {
                 if self.links.get(&key).is_some_and(|l| l.id == peer) {
-                    self.send_peer(&key, Kind::Candidate, &schema::CandidatePayload { mid, mline_index: mline, candidate });
+                    self.send_peer(
+                        &key,
+                        Kind::Candidate,
+                        &schema::CandidatePayload { mid, mline_index: mline, candidate },
+                    );
                 }
             }
             Internal::Stats(s) => self.on_stats(s),
@@ -1008,10 +1043,10 @@ impl Core {
                 self.store.set(&k, &(cur + n).to_string());
             }
             Internal::Token(t) => {
-                if let Some(c) = &mut self.cloud {
-                    if t.is_some() {
-                        c.token = t;
-                    }
+                if let Some(c) = &mut self.cloud
+                    && t.is_some()
+                {
+                    c.token = t;
                 }
             }
             Internal::HashDone { id, path, name, size, hash, recipients } => {
@@ -1028,11 +1063,9 @@ impl Core {
         for (conn, key) in conns {
             if let Some(e) = self.dir.get_mut(&key) {
                 let due = e.last_hello_sent.is_none_or(|t| now.duration_since(t) > Duration::from_secs(5));
-                if due {
-                    if let (Some(lan), Some(b)) = (&self.lan, &hello) {
-                        e.last_hello_sent = Some(now);
-                        lan.send(conn, b.clone());
-                    }
+                if due && let (Some(lan), Some(b)) = (&self.lan, &hello) {
+                    e.last_hello_sent = Some(now);
+                    lan.send(conn, b.clone());
                 }
             }
         }
@@ -1094,7 +1127,10 @@ impl Core {
         let any_lan = self.links.keys().any(|k| self.dir.get(k).is_some_and(|e| e.lan_conn.is_some()));
         let cloud_up = self.cloud.as_ref().is_some_and(|c| c.session_connected || c.connected);
         let (transport, latency) = if any_lan {
-            (SignalingTransport::Lan, if lan_lat.is_empty() { 0.0 } else { lan_lat.iter().sum::<f64>() / lan_lat.len() as f64 })
+            (
+                SignalingTransport::Lan,
+                if lan_lat.is_empty() { 0.0 } else { lan_lat.iter().sum::<f64>() / lan_lat.len() as f64 },
+            )
         } else if cloud_up {
             (SignalingTransport::Cloud, self.cloud.as_ref().and_then(|c| c.latency_ms).unwrap_or(0.0))
         } else {

@@ -58,7 +58,8 @@ pub fn tone_speech(t: Talker) -> Vec<i16> {
 }
 
 pub fn write_wav(path: &Path, samples: &[i16]) -> anyhow::Result<()> {
-    let spec = hound::WavSpec { channels: 1, sample_rate: RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+    let spec =
+        hound::WavSpec { channels: 1, sample_rate: RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
     let mut w = hound::WavWriter::create(path, spec)?;
     for s in samples {
         w.write_sample(*s)?;

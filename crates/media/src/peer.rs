@@ -269,6 +269,7 @@ fn ctx<T: Send + 'static>(tx: oneshot::Sender<T>) -> Box<PeerContext> {
     Box::new(PeerContext(Box::new(tx)))
 }
 
+#[allow(clippy::boxed_local)] // signature fixed by the cxx callback type
 fn finish<T: Send + 'static>(ctx: Box<PeerContext>, value: T) {
     let PeerContext(any) = *ctx;
     let any: Box<dyn Any + Send> = any;
@@ -367,9 +368,7 @@ impl PeerConnection {
             e.network_priority = webrtc_sys::webrtc::ffi::Priority::High;
             e.bitrate_priority = 4.0;
         }
-        sender
-            .set_parameters(params)
-            .map_err(|e| MediaError::PeerConnection(rtc_error_message(&e)))
+        sender.set_parameters(params).map_err(|e| MediaError::PeerConnection(rtc_error_message(&e)))
     }
 
     /// `PeerConnection::SetBitrate` (BWE min/start/max). `start` = `None` keeps the
@@ -423,21 +422,20 @@ impl PeerConnection {
             SdpKind::Offer => jsep::SdpType::Offer,
             SdpKind::Answer => jsep::SdpType::Answer,
         };
-        jsep::create_session_description(t, sdp.to_string())
-            .map_err(|e| MediaError::Sdp(e.what().to_string()))
+        jsep::create_session_description(t, sdp.to_string()).map_err(|e| MediaError::Sdp(e.what().to_string()))
     }
 
     pub async fn set_local_description(&self, kind: SdpKind, sdp: &str) -> Result<()> {
         let desc = Self::description(kind, sdp)?;
         let (tx, rx) = oneshot::channel::<RtcError>();
-        self.pc.set_local_description(desc, ctx(tx), |c, e| finish::<RtcError>(c, e));
+        self.pc.set_local_description(desc, ctx(tx), finish::<RtcError>);
         err_result(wait(rx).await?)
     }
 
     pub async fn set_remote_description(&self, kind: SdpKind, sdp: &str) -> Result<()> {
         let desc = Self::description(kind, sdp)?;
         let (tx, rx) = oneshot::channel::<RtcError>();
-        self.pc.set_remote_description(desc, ctx(tx), |c, e| finish::<RtcError>(c, e));
+        self.pc.set_remote_description(desc, ctx(tx), finish::<RtcError>);
         err_result(wait(rx).await?)
     }
 
@@ -446,7 +444,7 @@ impl PeerConnection {
         let desc = jsep::create_session_description(jsep::SdpType::Rollback, String::new())
             .map_err(|e| MediaError::Sdp(e.what().to_string()))?;
         let (tx, rx) = oneshot::channel::<RtcError>();
-        self.pc.set_local_description(desc, ctx(tx), |c, e| finish::<RtcError>(c, e));
+        self.pc.set_local_description(desc, ctx(tx), finish::<RtcError>);
         err_result(wait(rx).await?)
     }
 
@@ -454,7 +452,7 @@ impl PeerConnection {
         let c = jsep::create_ice_candidate(mid.to_string(), mline_index, candidate.to_string())
             .map_err(|e| MediaError::Candidate(e.what().to_string()))?;
         let (tx, rx) = oneshot::channel::<RtcError>();
-        self.pc.add_ice_candidate(c, ctx(tx), |c, e| finish::<RtcError>(c, e));
+        self.pc.add_ice_candidate(c, ctx(tx), finish::<RtcError>);
         let e = wait(rx).await?;
         if e.ok() { Ok(()) } else { Err(MediaError::Candidate(e.message)) }
     }
@@ -462,7 +460,7 @@ impl PeerConnection {
     /// Raw `RTCStatsReport` JSON from libwebrtc's `GetStats`.
     pub async fn stats_json(&self) -> Result<String> {
         let (tx, rx) = oneshot::channel::<String>();
-        self.pc.get_stats(ctx(tx), |c, json| finish::<String>(c, json));
+        self.pc.get_stats(ctx(tx), finish::<String>);
         wait(rx).await
     }
 

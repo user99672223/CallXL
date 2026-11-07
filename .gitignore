@@ -14,3 +14,4 @@
 .DS_Store
 /dist
 /artifacts
+/infra/worker/.npmrc.local

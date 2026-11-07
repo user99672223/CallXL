@@ -34,7 +34,11 @@ fn assert_lan_profile(who: &str, d: &Value, family: &str) {
     assert_eq!(p["path"]["local_candidate_type"], "host");
     assert_eq!(p["path"]["remote_candidate_type"], "host");
     let apm = &d["global"]["apm"];
-    assert_eq!(apm, &json!({"aec": true, "noise_suppression": true, "ns_level": "Moderate", "high_pass": true, "agc": true}), "{who} APM = §3 defaults");
+    assert_eq!(
+        apm,
+        &json!({"aec": true, "noise_suppression": true, "ns_level": "Moderate", "high_pass": true, "agc": true}),
+        "{who} APM = §3 defaults"
+    );
 }
 
 async fn lan_policy(name: &str, addr: &str, family: &str) -> Result<()> {
@@ -101,7 +105,10 @@ async fn audio_continuity_no_gaps() -> Result<()> {
     eprintln!("ceiling 64 -> target {low} kbps; back to 510 -> {high} kbps; raw apm {raw}");
     assert!(low <= 70.0, "ceiling 64 kbps not applied: {low}");
     assert!(high >= 470.0, "ceiling 510 kbps not restored: {high}");
-    assert_eq!(raw, json!({"aec": false, "noise_suppression": false, "ns_level": "Moderate", "high_pass": false, "agc": false}));
+    assert_eq!(
+        raw,
+        json!({"aec": false, "noise_suppression": false, "ns_level": "Moderate", "high_pass": false, "agc": false})
+    );
     let ra = a.stop().await?;
     let rb = b.stop().await?;
     // Bob hears alice through all of alice's changes.

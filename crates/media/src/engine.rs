@@ -53,13 +53,7 @@ impl ApmSettings {
     }
 
     fn from_ffi(s: &pcf::CallXlApmSettings) -> Self {
-        Self {
-            aec: s.aec,
-            noise_suppression: s.ns,
-            ns_level: s.ns_level,
-            high_pass: s.high_pass,
-            agc: s.agc2,
-        }
+        Self { aec: s.aec, noise_suppression: s.ns, ns_level: s.ns_level, high_pass: s.high_pass, agc: s.agc2 }
     }
 }
 
@@ -77,13 +71,7 @@ pub struct AnaPolicy {
 
 impl Default for AnaPolicy {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            increase_loss: 0.05,
-            decrease_loss: 0.01,
-            window_ms: 5_000,
-            decrease_hold_ms: 15_000,
-        }
+        Self { enabled: true, increase_loss: 0.05, decrease_loss: 0.01, window_ms: 5_000, decrease_hold_ms: 15_000 }
     }
 }
 
@@ -199,12 +187,7 @@ impl MediaEngine {
         if factory.is_null() {
             return Err(MediaError::Engine("libwebrtc refused to create the factory".into()));
         }
-        Ok(Self {
-            factory,
-            adm: opts.adm,
-            ana_enabled: opts.ana.enabled,
-            platform_acquired: Default::default(),
-        })
+        Ok(Self { factory, adm: opts.adm, ana_enabled: opts.ana.enabled, platform_acquired: Default::default() })
     }
 
     pub fn adm_mode(&self) -> &AdmMode {
@@ -218,8 +201,7 @@ impl MediaEngine {
 
     /// Microphone track captured by the ADM (platform or test). Audio stays in C++.
     pub fn create_audio_track(&self, apm: ApmSettings) -> Result<AudioTrack> {
-        let track =
-            self.factory.create_callxl_audio_track("callxl-mic".into(), apm.to_ffi(), self.ana_enabled);
+        let track = self.factory.create_callxl_audio_track("callxl-mic".into(), apm.to_ffi(), self.ana_enabled);
         if track.is_null() {
             return Err(MediaError::Engine("could not create the microphone track".into()));
         }
@@ -273,7 +255,13 @@ impl MediaEngine {
     /// echo likelihood); -1 = not available yet.
     pub fn apm_stats(&self) -> (f64, f64, f64, i32, f64) {
         let s = self.factory.callxl_apm_stats();
-        (s.echo_return_loss_db, s.echo_return_loss_enhancement_db, s.divergent_filter_fraction, s.delay_ms, s.residual_echo_likelihood)
+        (
+            s.echo_return_loss_db,
+            s.echo_return_loss_enhancement_db,
+            s.divergent_filter_fraction,
+            s.delay_ms,
+            s.residual_echo_likelihood,
+        )
     }
 
     pub fn ana_state(&self) -> AnaState {

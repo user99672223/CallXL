@@ -144,7 +144,11 @@ impl SignalCrypto {
             return Ok(*k);
         }
         let shared = self.identity.agreement.diffie_hellman(&XPublic::from(peer.agree_bytes()?));
-        let (from, to) = if outbound { (self.key.as_str(), peer.sign_pk.as_str()) } else { (peer.sign_pk.as_str(), self.key.as_str()) };
+        let (from, to) = if outbound {
+            (self.key.as_str(), peer.sign_pk.as_str())
+        } else {
+            (peer.sign_pk.as_str(), self.key.as_str())
+        };
         let hk = Hkdf::<Sha256>::new(Some(b"callxl-v1"), shared.as_bytes());
         let mut okm = [0u8; 32];
         let info = format!("callxl msg {from}->{to}");
@@ -179,7 +183,10 @@ impl SignalCrypto {
             let key = self.pair_key(peer, true)?;
             let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
             cipher
-                .encrypt(Nonce::from_slice(&Self::nonce(seq)), AeadPayload { msg: plaintext, aad: &Self::aad(kind, sid, fp) })
+                .encrypt(
+                    Nonce::from_slice(&Self::nonce(seq)),
+                    AeadPayload { msg: plaintext, aad: &Self::aad(kind, sid, fp) },
+                )
                 .map_err(|_| SignalError::Decrypt)?
         } else {
             plaintext.to_vec()

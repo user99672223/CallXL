@@ -126,14 +126,8 @@ pub mod ffi {
         ) -> bool;
         fn take_keyframe_request(self: &VideoTrackSource) -> bool;
         fn take_rate_control_request(self: &VideoTrackSource) -> EncodedRateControlRequest;
-        fn set_packet_trailer_handler(
-            self: &VideoTrackSource,
-            handler: SharedPtr<PacketTrailerHandler>,
-        );
-        fn new_video_track_source(
-            resolution: &VideoResolution,
-            is_screencast: bool,
-        ) -> SharedPtr<VideoTrackSource>;
+        fn set_packet_trailer_handler(self: &VideoTrackSource, handler: SharedPtr<PacketTrailerHandler>);
+        fn new_video_track_source(resolution: &VideoResolution, is_screencast: bool) -> SharedPtr<VideoTrackSource>;
         fn video_to_media(track: SharedPtr<VideoTrack>) -> SharedPtr<MediaStreamTrack>;
         unsafe fn media_to_video(track: SharedPtr<MediaStreamTrack>) -> SharedPtr<VideoTrack>;
         fn _shared_video_track() -> SharedPtr<VideoTrack>;
@@ -144,10 +138,7 @@ pub mod ffi {
 
         fn on_frame(self: &VideoSinkWrapper, frame: UniquePtr<VideoFrame>);
         fn on_discarded_frame(self: &VideoSinkWrapper);
-        fn on_constraints_changed(
-            self: &VideoSinkWrapper,
-            constraints: VideoTrackSourceConstraints,
-        );
+        fn on_constraints_changed(self: &VideoSinkWrapper, constraints: VideoTrackSourceConstraints);
     }
 }
 
@@ -209,9 +200,7 @@ mod tests {
     /// keyframe request, until the next keyframe restores the chain.
     #[test]
     fn passthrough_holds_deltas_after_gap() {
-        let results = ffi_tests::passthrough_chain_guard_for_test(&[
-            KEY, DELTA, DROPPED, DELTA, DELTA, KEY, DELTA,
-        ]);
+        let results = ffi_tests::passthrough_chain_guard_for_test(&[KEY, DELTA, DROPPED, DELTA, DELTA, KEY, DELTA]);
         assert_eq!(results, [SENT, SENT, KEY_REQUESTED, KEY_REQUESTED, SENT, SENT],);
     }
 

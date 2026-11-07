@@ -1,0 +1,21 @@
+# CallXL signaling Worker. Deployed by .github/workflows/worker.yml (Phase 2) when
+# CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID exist. Secrets (never in git):
+#   wrangler secret put APP_SECRET          # same value as the CI secret APP_SECRET
+#   wrangler secret put TOKEN_SIGNING_KEY   # random, e.g. `openssl rand -hex 32`
+#   wrangler secret put TURN_KEY_ID         # optional: Cloudflare Calls TURN key
+#   wrangler secret put TURN_API_TOKEN      # optional
+name = "callxl"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "LOBBY"
+class_name = "Lobby"
+
+[[durable_objects.bindings]]
+name = "SESSION"
+class_name = "Session"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Lobby", "Session"]

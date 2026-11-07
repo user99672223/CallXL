@@ -5,11 +5,11 @@
 //! addressed to a peer are encrypted to that peer; every envelope is signed.
 
 pub mod crypto;
-mod words;
 pub mod framing;
 pub mod lobby;
 pub mod negotiation;
 pub mod schema;
+mod words;
 
 pub use crypto::{DeviceCard, Identity, PeerKey, SignalCrypto, trust_phrase};
 pub use schema::{Envelope, Kind, Payload, SessionInfo};
@@ -37,8 +37,5 @@ pub enum SignalError {
 pub type Result<T> = std::result::Result<T, SignalError>;
 
 pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }

@@ -176,11 +176,7 @@ pub mod ffi {
             stream_ids: &Vec<String>,
         ) -> Result<SharedPtr<RtpSender>>;
         fn remove_track(self: &PeerConnection, sender: SharedPtr<RtpSender>) -> Result<()>;
-        fn get_stats(
-            self: &PeerConnection,
-            ctx: Box<PeerContext>,
-            on_stats: fn(ctx: Box<PeerContext>, json: String),
-        );
+        fn get_stats(self: &PeerConnection, ctx: Box<PeerContext>, on_stats: fn(ctx: Box<PeerContext>, json: String));
         fn add_transceiver(
             self: &PeerConnection,
             track: SharedPtr<MediaStreamTrack>,

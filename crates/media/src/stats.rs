@@ -90,7 +90,10 @@ impl StatsReport {
             _ => return None,
         };
         let by_id = |id: &str| items.iter().find(|o| o.get("id").and_then(Value::as_str) == Some(id));
-        let kind = |o: &Value| o.get("kind").and_then(Value::as_str).or_else(|| o.get("mediaType").and_then(Value::as_str)) == Some("audio");
+        let kind = |o: &Value| {
+            o.get("kind").and_then(Value::as_str).or_else(|| o.get("mediaType").and_then(Value::as_str))
+                == Some("audio")
+        };
         let mut r = StatsReport::default();
         let mut send_codec_id = String::new();
         let mut selected_pair_id = String::new();
@@ -203,9 +206,9 @@ pub fn frame_ms_from_pps(pps: f64) -> Option<u32> {
         return None;
     }
     let ms = 1000.0 / pps;
-    [10u32, 20, 40, 60].into_iter().min_by(|a, b| {
-        (f64::from(*a) - ms).abs().partial_cmp(&(f64::from(*b) - ms).abs()).unwrap()
-    })
+    [10u32, 20, 40, 60]
+        .into_iter()
+        .min_by(|a, b| (f64::from(*a) - ms).abs().partial_cmp(&(f64::from(*b) - ms).abs()).unwrap())
 }
 
 #[cfg(test)]
@@ -220,7 +223,10 @@ mod tests {
             {"type":"candidate-pair","id":"P","localCandidateId":"L","remoteCandidateId":"R","currentRoundTripTime":0.002},
             {"type":"local-candidate","id":"L","address":"::1","port":5000,"candidateType":"host","protocol":"udp"},
             {"type":"remote-candidate","id":"R","address":"::1","port":5001,"candidateType":"host","protocol":"udp"}]"#;
-        let b = a.replace("\"timestamp\":1000", "\"timestamp\":2000").replace("\"packetsSent\":100", "\"packetsSent\":200").replace("\"bytesSent\":6000", "\"bytesSent\":66000");
+        let b = a
+            .replace("\"timestamp\":1000", "\"timestamp\":2000")
+            .replace("\"packetsSent\":100", "\"packetsSent\":200")
+            .replace("\"bytesSent\":6000", "\"bytesSent\":66000");
         let ra = StatsReport::parse(a).unwrap();
         let rb = StatsReport::parse(&b).unwrap();
         assert_eq!(ra.codec_mime, "audio/opus");

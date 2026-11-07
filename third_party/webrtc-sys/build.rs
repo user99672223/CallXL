@@ -197,9 +197,7 @@ fn main() {
             add_lazy_load_so(
                 &mut builder,
                 "desktop_capturer",
-                ["drm", "gbm", "X11", "Xfixes", "Xdamage", "Xrandr", "Xcomposite", "Xext"]
-                    .map(String::from)
-                    .to_vec(),
+                ["drm", "gbm", "X11", "Xfixes", "Xdamage", "Xrandr", "Xcomposite", "Xext"].map(String::from).to_vec(),
             );
 
             let x86 = target_arch == "x86_64" || target_arch == "i686";
@@ -217,11 +215,7 @@ fn main() {
                         .file("src/vaapi/h264_encoder_impl.cpp")
                         .flag("-DUSE_VAAPI_VIDEO_CODEC=1");
 
-                    add_lazy_load_so(
-                        &mut builder,
-                        "vaapi",
-                        ["va", "va-drm"].map(String::from).to_vec(),
-                    );
+                    add_lazy_load_so(&mut builder, "vaapi", ["va", "va-drm"].map(String::from).to_vec());
                 } else {
                     println!("cargo:warning=libva not found; building without hardware accelerated video codecs");
                 }
@@ -263,10 +257,7 @@ fn main() {
                         if src_path.exists() {
                             builder.file(&src_path);
                         } else {
-                            println!(
-                                "cargo:warning=Jetson MMAPI source not found: {}",
-                                src_path.display()
-                            );
+                            println!("cargo:warning=Jetson MMAPI source not found: {}", src_path.display());
                         }
                     }
 
@@ -274,11 +265,7 @@ fn main() {
                     // runtime (see src/jetson/jetson_runtime_loader.cpp), so
                     // the same aarch64 binary loads on non-Jetson systems
                     // where those libraries are absent.
-                    add_lazy_load_so(
-                        &mut builder,
-                        "jetson",
-                        ["v4l2", "nvbufsurface"].map(String::from).to_vec(),
-                    );
+                    add_lazy_load_so(&mut builder, "jetson", ["v4l2", "nvbufsurface"].map(String::from).to_vec());
                 }
             }
 
@@ -309,20 +296,13 @@ fn main() {
                         .flag("-Wno-deprecated-declarations")
                         .flag("-DUSE_NVIDIA_VIDEO_CODEC=1");
 
-                    add_lazy_load_so(
-                        &mut builder,
-                        "nvidia",
-                        ["cuda", "nvcuvid"].map(String::from).to_vec(),
-                    );
+                    add_lazy_load_so(&mut builder, "nvidia", ["cuda", "nvcuvid"].map(String::from).to_vec());
                 } else {
                     println!("cargo:warning=cuda.h not found; building without hardware accelerated video codec support for NVidia GPUs");
                 }
             }
 
-            builder
-                .flag("-Wno-changes-meaning")
-                .flag("-Wno-deprecated-declarations")
-                .flag("-std=c++20");
+            builder.flag("-Wno-changes-meaning").flag("-Wno-deprecated-declarations").flag("-std=c++20");
         }
         "macos" => {
             println!("cargo:rustc-link-lib=framework=Foundation");
@@ -375,10 +355,7 @@ fn main() {
 
             configure_darwin_sysroot(&mut builder);
 
-            builder
-                .file("src/objc_video_factory.mm")
-                .file("src/objc_video_frame_buffer.mm")
-                .flag("-std=c++20");
+            builder.file("src/objc_video_factory.mm").file("src/objc_video_frame_buffer.mm").flag("-std=c++20");
         }
         "android" => {
             webrtc_sys_build::configure_jni_symbols().unwrap();
@@ -436,8 +413,7 @@ fn get_output_path() -> PathBuf {
     let manifest_dir_string = env::var("CARGO_MANIFEST_DIR").unwrap();
     let build_type = env::var("PROFILE").unwrap();
     let build_target = env::var("TARGET").unwrap();
-    let path =
-        Path::new(&manifest_dir_string).join("../target").join(build_target).join(build_type);
+    let path = Path::new(&manifest_dir_string).join("../target").join(build_target).join(build_type);
     return PathBuf::from(path);
 }
 
@@ -493,20 +469,10 @@ fn add_lazy_load_so(builder: &mut cc::Build, name: &str, libraries: Vec<String>)
         if target_arch.contains("arm64") {
             arch_dir = "aarch64-linux-gnu";
         }
-        let implib_file_c_name = "src/lazy_load_deps_for/".to_owned()
-            + name
-            + "/"
-            + arch_dir
-            + "/lib"
-            + &lib_name
-            + ".so.init.c";
-        let implib_file_asm_name = "src/lazy_load_deps_for/".to_owned()
-            + name
-            + "/"
-            + arch_dir
-            + "/lib"
-            + &lib_name
-            + ".so.tramp.S";
+        let implib_file_c_name =
+            "src/lazy_load_deps_for/".to_owned() + name + "/" + arch_dir + "/lib" + &lib_name + ".so.init.c";
+        let implib_file_asm_name =
+            "src/lazy_load_deps_for/".to_owned() + name + "/" + arch_dir + "/lib" + &lib_name + ".so.tramp.S";
         builder.file(implib_file_c_name).file(implib_file_asm_name);
     }
 }
@@ -569,12 +535,9 @@ fn configure_hermetic_libcxx(builder: &mut cc::Build, webrtc_include: &path::Pat
     // libstdc++ and cannot satisfy the std::__Cr call sites in the generated
     // bridges. Compile a second copy with the flags above to provide those.
     // DEP_CXXBRIDGE1_HEADER is `cargo:HEADER` from the cxx crate: <root>/include/cxx.h.
-    let cxx_h = env::var("DEP_CXXBRIDGE1_HEADER")
-        .expect("cxx crate did not export HEADER; cannot locate its cxx.cc");
-    let cxx_root = path::Path::new(&cxx_h)
-        .parent()
-        .and_then(path::Path::parent)
-        .expect("unexpected DEP_CXXBRIDGE1_HEADER layout");
+    let cxx_h = env::var("DEP_CXXBRIDGE1_HEADER").expect("cxx crate did not export HEADER; cannot locate its cxx.cc");
+    let cxx_root =
+        path::Path::new(&cxx_h).parent().and_then(path::Path::parent).expect("unexpected DEP_CXXBRIDGE1_HEADER layout");
     builder.file(cxx_root.join("src/cxx.cc"));
 }
 
@@ -594,9 +557,9 @@ fn check_clang_version(builder: &cc::Build, libcxx: &path::Path) {
         .output()
         .unwrap_or_else(|e| panic!("failed to run {}: {e}", compiler.path().display()));
 
-    let major = String::from_utf8_lossy(&defines.stdout).lines().find_map(|line| {
-        line.strip_prefix("#define __clang_major__ ").and_then(|v| v.trim().parse::<u32>().ok())
-    });
+    let major = String::from_utf8_lossy(&defines.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("#define __clang_major__ ").and_then(|v| v.trim().parse::<u32>().ok()));
 
     match major {
         Some(major) if major >= min => {}

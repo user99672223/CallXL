@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use callxl_media::policy::{self, PathKind as MPathKind};
 use callxl_media::{
-    DataChannel, DataChannelEvent, DataChannelOptions, IceConnectionState, MediaEvent, PeerConfig,
-    PeerConnection, PeerConnectionState, PeerId, SdpKind, SignalingState, sdp,
+    DataChannel, DataChannelEvent, DataChannelOptions, IceConnectionState, MediaEvent, PeerConfig, PeerConnection,
+    PeerConnectionState, PeerId, SdpKind, SignalingState, sdp,
 };
 use callxl_signal::negotiation::{Negotiator, OfferAction};
 use callxl_signal::schema::{CandidatePayload, SdpPayload};
@@ -168,9 +168,17 @@ impl Core {
         };
         // Loopback/LAN-only test peers gather host candidates only (no internet here).
         if self.dev.bind.is_empty() {
-            cfg.ice_servers.push(callxl_media::IceServer { urls: stun, username: String::new(), credential: String::new() });
+            cfg.ice_servers.push(callxl_media::IceServer {
+                urls: stun,
+                username: String::new(),
+                credential: String::new(),
+            });
             if let Some(turn) = token.and_then(|t| t.turn) {
-                cfg.ice_servers.push(callxl_media::IceServer { urls: turn.urls, username: turn.username, credential: turn.credential });
+                cfg.ice_servers.push(callxl_media::IceServer {
+                    urls: turn.urls,
+                    username: turn.username,
+                    credential: turn.credential,
+                });
             }
         }
         if let Some(p) = self.dev.ice_policy {
@@ -197,10 +205,16 @@ impl Core {
             self.error(format!("could not send audio to {name}: {e}"));
         }
         let chat = pc
-            .create_data_channel("chat", DataChannelOptions { ordered: true, reliable: true, negotiated_id: Some(CHAT_CHANNEL_ID) })
+            .create_data_channel(
+                "chat",
+                DataChannelOptions { ordered: true, reliable: true, negotiated_id: Some(CHAT_CHANNEL_ID) },
+            )
             .ok();
         let ctl = pc
-            .create_data_channel("ctl", DataChannelOptions { ordered: true, reliable: true, negotiated_id: Some(CTL_CHANNEL_ID) })
+            .create_data_channel(
+                "ctl",
+                DataChannelOptions { ordered: true, reliable: true, negotiated_id: Some(CTL_CHANNEL_ID) },
+            )
             .ok();
         let mut channels = HashMap::new();
         if let Some(c) = &chat {
@@ -277,10 +291,6 @@ impl Core {
         if let Err(e) = l.pc.set_bitrate(p.bwe_min_bps, None, p.bwe_max_bps) {
             tracing::warn!("set_bitrate: {e}");
         }
-    }
-
-    pub async fn renegotiate(&mut self, key: &str) {
-        self.make_offer(key).await;
     }
 
     pub async fn make_offer(&mut self, key: &str) {
@@ -384,10 +394,11 @@ impl Core {
         if let Some(l) = self.links.get_mut(&key) {
             l.force_offer = false;
         }
-        if pending && self.links.get(&key).is_some_and(|l| l.pc.signaling_state() == SignalingState::Stable) {
-            if self.links.get(&key).is_some_and(|l| l.needs_offer) {
-                self.make_offer(&key).await;
-            }
+        if pending
+            && self.links.get(&key).is_some_and(|l| l.pc.signaling_state() == SignalingState::Stable)
+            && self.links.get(&key).is_some_and(|l| l.needs_offer)
+        {
+            self.make_offer(&key).await;
         }
     }
 
@@ -404,23 +415,21 @@ impl Core {
     }
 
     pub async fn on_remote_candidate(&mut self, key: &str, c: CandidatePayload) {
-        if let Some(p) = policy::parse_candidate(&c.candidate) {
-            if policy::is_discarded_address(&p.address) {
-                return;
-            }
+        if let Some(p) = policy::parse_candidate(&c.candidate)
+            && policy::is_discarded_address(&p.address)
+        {
+            return;
         }
         let Some(l) = self.links.get_mut(key) else { return };
         let mut reclassify = false;
-        if let Some(p) = policy::parse_candidate(&c.candidate) {
-            if p.typ == "host" {
-                reclassify = l.selected.as_ref().is_some_and(|(_, r)| r.typ == "prflx" && r.port == p.port);
-                l.remote_hosts.push((p.address, p.port));
-            }
+        if let Some(p) = policy::parse_candidate(&c.candidate)
+            && p.typ == "host"
+        {
+            reclassify = l.selected.as_ref().is_some_and(|(_, r)| r.typ == "prflx" && r.port == p.port);
+            l.remote_hosts.push((p.address, p.port));
         }
-        if reclassify {
-            if let Some((loc, rem)) = l.selected.clone() {
-                self.on_selected_pair(key, loc, rem, "remote host candidate arrived", false);
-            }
+        if reclassify && let Some((loc, rem)) = l.selected.clone() {
+            self.on_selected_pair(key, loc, rem, "remote host candidate arrived", false);
         }
         let Some(l) = self.links.get_mut(key) else { return };
         if !l.remote_set {
@@ -429,10 +438,10 @@ impl Core {
         }
         let ignoring = l.negotiator.ignore_offer;
         let pc = l.pc.clone();
-        if let Err(e) = pc.add_ice_candidate(&c.mid, c.mline_index, &c.candidate).await {
-            if !ignoring {
-                tracing::debug!("candidate from {} rejected: {e}", short(key));
-            }
+        if let Err(e) = pc.add_ice_candidate(&c.mid, c.mline_index, &c.candidate).await
+            && !ignoring
+        {
+            tracing::debug!("candidate from {} rejected: {e}", short(key));
         }
     }
 
@@ -448,7 +457,9 @@ impl Core {
                 return;
             }
         }
-        if let (Some(relay), "host", "udp") = (self.dev.candidate_rewrite, parsed.typ.as_str(), parsed.protocol.as_str()) {
+        if let (Some(relay), "host", "udp") =
+            (self.dev.candidate_rewrite, parsed.typ.as_str(), parsed.protocol.as_str())
+        {
             match crate::relay_client::register(relay, &parsed.address, parsed.port).await {
                 Ok(addr) => {
                     if let Some(r) = policy::rewrite_candidate(&candidate, &addr.ip().to_string(), addr.port()) {
@@ -561,12 +572,11 @@ impl Core {
                 }
             }
             MediaEvent::SignalingState { peer, state } => {
-                if state == SignalingState::Stable {
-                    if let Some(key) = self.peer_ids.get(&peer).cloned() {
-                        if self.links.get(&key).is_some_and(|l| l.needs_offer) {
-                            self.make_offer(&key).await;
-                        }
-                    }
+                if state == SignalingState::Stable
+                    && let Some(key) = self.peer_ids.get(&peer).cloned()
+                    && self.links.get(&key).is_some_and(|l| l.needs_offer)
+                {
+                    self.make_offer(&key).await;
                 }
             }
             MediaEvent::IceConnectionState { peer, state } => self.on_ice_state(peer, state),
@@ -681,7 +691,11 @@ impl Core {
             };
             let down = now.duration_since(since);
             if l.ever_connected {
-                let wait = if l.negotiator.polite { Duration::from_millis(2_000) } else { Duration::from_millis(config::ICE_RESTART_AFTER_MS) };
+                let wait = if l.negotiator.polite {
+                    Duration::from_millis(2_000)
+                } else {
+                    Duration::from_millis(config::ICE_RESTART_AFTER_MS)
+                };
                 let again = l.restarted_at.is_none_or(|t| now.duration_since(t) > Duration::from_secs(5));
                 if down > wait && again {
                     l.restarted_at = Some(now);

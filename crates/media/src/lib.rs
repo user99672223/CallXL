@@ -17,13 +17,11 @@ pub mod stats;
 
 pub use data_channel::{DataChannel, DataChannelEvent, DataChannelOptions, DataState};
 pub use engine::{
-    AdmMode, AnaPolicy, AnaState, ApmSettings, AudioDeviceInfo, EngineOptions, MediaEngine,
-    NetworkFilter, TestAdmStats,
+    AdmMode, AnaPolicy, AnaState, ApmSettings, AudioDeviceInfo, EngineOptions, MediaEngine, NetworkFilter, TestAdmStats,
 };
 pub use peer::{
-    AudioTrack, CandidateInfo, IceConnectionState, IcePolicy, IceServer, MediaEvent,
-    PeerConfig, PeerConnection, PeerConnectionState, PeerId, RemoteDataChannel, SdpKind,
-    SignalingState, allocator_flags, dropped_events,
+    AudioTrack, CandidateInfo, IceConnectionState, IcePolicy, IceServer, MediaEvent, PeerConfig, PeerConnection,
+    PeerConnectionState, PeerId, RemoteDataChannel, SdpKind, SignalingState, allocator_flags, dropped_events,
 };
 
 /// Errors surfaced by the media plane. Messages are plain English.

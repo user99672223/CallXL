@@ -80,13 +80,7 @@ pub mod ffi {
         type AudioSinkWrapper;
         type SourceContext;
 
-        fn on_data(
-            self: &AudioSinkWrapper,
-            data: &[i16],
-            sample_rate: i32,
-            nb_channels: usize,
-            nb_frames: usize,
-        );
+        fn on_data(self: &AudioSinkWrapper, data: &[i16], sample_rate: i32, nb_channels: usize, nb_frames: usize);
     }
 }
 

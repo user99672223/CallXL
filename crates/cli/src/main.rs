@@ -10,7 +10,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};
-use callxl_core::{AppConfig, ApmConfig, CallXl, DevOptions};
+use callxl_core::{ApmConfig, AppConfig, CallXl, DevOptions};
 use clap::Parser;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -164,8 +164,9 @@ async fn dispatch(core: &Arc<CallXl>, cmd: &str, args: &Value) -> Result<Value> 
             to(&core.chat_history(s(args, "session")?, limit, opt_s(args, "before")))
         }
         "offer_file" => {
-            let recipients: Vec<String> = serde_json::from_value(args.get("recipients").cloned().unwrap_or(Value::Null))
-                .context("recipients must be a list of keys")?;
+            let recipients: Vec<String> =
+                serde_json::from_value(args.get("recipients").cloned().unwrap_or(Value::Null))
+                    .context("recipients must be a list of keys")?;
             Value::String(core.offer_file(s(args, "path")?, recipients))
         }
         "respond_file_offer" => {
@@ -266,7 +267,9 @@ async fn main() -> Result<()> {
     let test_adm = parse_adm(&args.adm)?;
     let cloud = !(args.no_cloud || args.lan_only);
     let relay = match &args.debug_candidate_rewrite {
-        Some(u) => Some(u.strip_prefix("tcp://").unwrap_or(u).parse::<SocketAddr>().context("--debug-candidate-rewrite")?),
+        Some(u) => {
+            Some(u.strip_prefix("tcp://").unwrap_or(u).parse::<SocketAddr>().context("--debug-candidate-rewrite")?)
+        }
         None => None,
     };
     let dev = DevOptions {
@@ -321,7 +324,10 @@ async fn main() -> Result<()> {
     } else if let Some(addr) = control.strip_prefix("tcp://") {
         let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("bind {addr}"))?;
         let bound = listener.local_addr()?;
-        println!("{}", json!({"ready": true, "control": format!("tcp://{bound}"), "lan": lan, "key": card.signing_key}));
+        println!(
+            "{}",
+            json!({"ready": true, "control": format!("tcp://{bound}"), "lan": lan, "key": card.signing_key})
+        );
         let (c, t, st) = (core.clone(), ev_tx.clone(), stop.clone());
         tokio::spawn(async move {
             while let Ok((sock, _)) = listener.accept().await {
