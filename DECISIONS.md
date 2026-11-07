@@ -518,3 +518,8 @@ build set-up (MSVC under Git Bash: `/usr/bin/link` shadows `link.exe` under vcva
 p2/desktop was still fixing (its own run 42357923913 also fails); macOS failed on the iOS
 test of D-0083. Neither is a workflow defect; the reusable builds follow those jobs and
 will be re-synced from the merged versions.
+
+D-0085 (2026-11-07, p2/infra-qa) — Additional baseline (D-0081 table): the integration
+branch's first `ci.yml` run after the PR #1 merge (run 42357082797, d293752, old single
+serial `linux` job, no warm cache on that branch) took 19 m 51 s; the same code on the
+fanned-out layout ran cold in 7 m 48 s and warm in 3 m 41 s (D-0081).
