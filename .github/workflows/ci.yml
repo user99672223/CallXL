@@ -224,6 +224,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # cl.exe, link.exe, rc.exe, dumpbin on PATH (vcvars64): cc-rs and sccache need them.
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
 
