@@ -21,3 +21,4 @@
 /apps/ios/CallXL/Generated/
 /apps/ios/CallXL.xcodeproj
 /packaging/ios/uniffi-bindgen/target
+/apps/ios/CallXL/Info.plist

@@ -717,3 +717,19 @@ D-0040 (2026-11-07, p2/ios) — iOS keychain entry for the identity is the fixed
 container path contains a UUID that may change on update/re-signing, which would have
 generated a new identity (and a "Key changed" prompt at every peer) after a weekly
 re-sideload. One app sandbox = one profile, so nothing collides.
+
+D-0041 (2026-11-07, p2/ios) — iOS audio session and CallKit: libwebrtc's iOS ADM configures
+the session itself from `RTCAudioSessionConfiguration.webRTCConfiguration` (which lacks
+`.defaultToSpeaker`), and WebRTC's CallKit integration is `RTCAudioSession.useManualAudio`
++ `isAudioEnabled` toggled in `provider(_:didActivate:)`. The prebuilt is built with
+`rtc_enable_objc_symbol_export=false`, so those classes cannot be linked against; the
+app reaches them through the Objective-C runtime (`NSClassFromString`, KVC) — they are
+registered because the framework links libwebrtc with `-ObjC`. At launch the app sets
+WebRTC's configuration to §8's (`.playAndRecord`, `.voiceChat`, `.allowBluetooth`,
+`.allowBluetoothA2DP`, `.defaultToSpeaker`) and enables manual audio; a CallKit
+`CXStartCallAction` configures the session and joins, CallKit activates it, the app then
+enables WebRTC audio. Hold (a phone call) mutes the microphone until resume. If CallKit
+refuses the transaction the app joins anyway and activates the session itself. File
+sending uses the system document picker (Files, iCloud, other providers) with a recipient
+picker, not a Share Extension (a second process with its own IPC to the running core);
+picked files stay security-scoped until the transfer ends, so nothing is copied.
