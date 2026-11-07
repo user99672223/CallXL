@@ -243,3 +243,16 @@ That measured the harness, not CallXL. The proxy backend has always impaired onl
 media's UDP, so both backends now emulate the same thing. Also: CI uses Node 22, which
 current wrangler requires (`wrangler dev` refused to start under Node 20 in that run;
 vitest alone still worked).
+
+D-0031 (2026-11-07, phase1) — Controlled-side anti-flap in `CallXlIceController`: for
+1 s after a selected-pair change, a DATA_RECEIVED switch back to the pair just left is
+ignored while the current pair is usable (writable, receiving, has RTT). libwebrtc's
+controlled agent re-selects whichever nominated pair data arrives on; after the
+controlling agent's single switch away from a 60 ms-delayed IPv6 path, packets still in
+flight on it flipped the controlled side's selection — and its outgoing audio path — 9
+times within 60 ms (CI run 42344660897, `netem_path_switch_v4_to_v6`: alice
+`pair_switches` 0 → 9 at one controlling-side decision "v6->v4: rtt 120->0 ms"). Failover
+is unaffected (unusable current pair → libwebrtc decides), and nomination-driven switches
+always pass. The loopback LAN-start floor is family-aware: 452.4 kbps on IPv4 and
+436.4 kbps on IPv6 are the same 510 kbps BWE start minus packet overhead (CI run
+42344660897 v6: 436.4, 436.4, 510, …).

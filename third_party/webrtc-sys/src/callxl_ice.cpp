@@ -11,7 +11,11 @@
  *   - continuously for sustain_ms,
  *   - and at least cooldown_ms after the previous switch.
  * Failover (selected pair destroyed / not writable / not receiving) is never
- * delayed. The controlled agent follows nominations unchanged.
+ * delayed. The controlled agent follows nominations, except that for
+ * kControlledFlapGuardMs after a change it ignores DATA_RECEIVED switches back
+ * to the pair it just left: packets still in flight on the old (slower) path
+ * otherwise flip the selection on every packet (CI: 9 flips in 60 ms after one
+ * controlling-side switch away from a 60 ms-delayed IPv6 path).
  * The controller runs on the network thread; it reports each switch it makes
  * through PeerConnectionObserverWrapper::on_ice_controller_decision, which on
  * the Rust side does exactly one try_send.
@@ -45,6 +49,8 @@ struct ConnMetrics {
   std::string qualifying_reason;
 };
 
+constexpr int64_t kControlledFlapGuardMs = 1000;
+
 bool IsV6(const Connection* c) {
   return c->local_candidate().address().family() == AF_INET6;
 }
@@ -67,6 +73,8 @@ class CallXlIceController final : public IceControllerInterface {
     if (c && c != selected_) {
       const int64_t now = webrtc::TimeMillis();
       if (first_selected_ms_ < 0) first_selected_ms_ = now;
+      previous_selected_ = selected_;
+      selected_changed_ms_ = now;
       selected_ = c;
       for (auto& kv : metrics_) kv.second.qualifying_since_ms = -1;
     } else if (!c) {
@@ -78,6 +86,7 @@ class CallXlIceController final : public IceControllerInterface {
     inner_.OnConnectionDestroyed(c);
     metrics_.erase(c);
     if (selected_ == c) selected_ = nullptr;
+    if (previous_selected_ == c) previous_selected_ = nullptr;
   }
   std::span<const Connection* const> GetConnections() const override {
     return inner_.GetConnections();
@@ -158,8 +167,17 @@ class CallXlIceController final : public IceControllerInterface {
     }
     Sample(now);
 
-    // Controlled side follows the controlling agent's nominations.
-    if (role_ && role_() != webrtc::ICEROLE_CONTROLLING) return inner;
+    // Controlled side follows the controlling agent's nominations, without
+    // flapping back on late packets from the path it just left.
+    if (role_ && role_() != webrtc::ICEROLE_CONTROLLING) {
+      if (reason == IceSwitchReason::DATA_RECEIVED && inner.connection &&
+          *inner.connection && *inner.connection == previous_selected_ &&
+          selected_ && Usable(selected_) &&
+          now - selected_changed_ms_ < kControlledFlapGuardMs) {
+        return SwitchResult{};
+      }
+      return inner;
+    }
 
     // No usable selection yet, failover, or initial settling: libwebrtc decides.
     const bool selected_ok = selected_ && Usable(selected_);
@@ -240,6 +258,8 @@ class CallXlIceController final : public IceControllerInterface {
   const livekit_ffi::PeerConnectionObserverWrapper* observer_;
   std::map<const Connection*, ConnMetrics> metrics_;
   const Connection* selected_ = nullptr;
+  const Connection* previous_selected_ = nullptr;
+  int64_t selected_changed_ms_ = -1;
   int64_t first_selected_ms_ = -1;
   int64_t last_switch_ms_ = -1;
   int64_t recheck_pending_until_ms_ = -1;

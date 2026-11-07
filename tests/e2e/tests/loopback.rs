@@ -30,7 +30,8 @@ fn assert_lan_profile(who: &str, d: &Value, family: &str) {
     let target = p["opus_bitrate_kbps"].as_f64().unwrap();
     assert!(target >= 470.0, "{who} Opus target {target} kbps < 470");
     // §3 "LAN path: 510 kbps immediately": every 1 Hz sample since media started is at
-    // the LAN start (510 kbps BWE start − packet overhead ≈ 452 kbps Opus) or above.
+    // the LAN start or above: 510 kbps BWE start − packet overhead = 452.4 kbps Opus on
+    // IPv4, 436.4 kbps on IPv6 (20 more header bytes × 100 packets/s).
     let tag = &p["peer_key"].as_str().unwrap()[..8];
     let series: Vec<f64> = d["series"]
         .as_array()
@@ -40,7 +41,8 @@ fn assert_lan_profile(who: &str, d: &Value, family: &str) {
         .unwrap_or_default();
     eprintln!("{who} Opus target since media start: {series:?}");
     assert!(series.len() >= 5, "{who}: too few samples");
-    assert!(series.iter().all(|x| *x >= 450.0), "{who}: LAN call did not start at the LAN rate: {series:?}");
+    let floor = if family == "V6" { 430.0 } else { 445.0 };
+    assert!(series.iter().all(|x| *x >= floor), "{who}: LAN call did not start at the LAN rate: {series:?}");
     assert_eq!(p["path"]["kind"], "Lan", "{who} path kind");
     assert_eq!(p["path"]["local_family"], family, "{who} family");
     assert_eq!(p["path"]["local_candidate_type"], "host");
