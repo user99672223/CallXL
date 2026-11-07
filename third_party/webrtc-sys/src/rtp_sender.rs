@@ -37,7 +37,11 @@ pub mod ffi {
 
         fn set_track(self: &RtpSender, track: SharedPtr<MediaStreamTrack>) -> bool;
         fn track(self: &RtpSender) -> SharedPtr<MediaStreamTrack>;
-        fn get_stats(self: &RtpSender, ctx: Box<SenderContext>, on_stats: fn(ctx: Box<SenderContext>, json: String));
+        fn get_stats(
+            self: &RtpSender,
+            ctx: Box<SenderContext>,
+            on_stats: fn(ctx: Box<SenderContext>, json: String),
+        );
         fn ssrc(self: &RtpSender) -> u32;
         fn media_type(self: &RtpSender) -> MediaType;
         fn id(self: &RtpSender) -> String;

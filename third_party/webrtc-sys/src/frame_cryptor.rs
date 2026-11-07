@@ -77,11 +77,24 @@ pub mod ffi {
 
         pub fn set_sif_trailer(&self, trailer: Vec<u8>);
 
-        pub fn set_key(self: &KeyProvider, participant_id: String, key_index: i32, key: Vec<u8>) -> bool;
+        pub fn set_key(
+            self: &KeyProvider,
+            participant_id: String,
+            key_index: i32,
+            key: Vec<u8>,
+        ) -> bool;
 
-        pub fn ratchet_key(self: &KeyProvider, participant_id: String, key_index: i32) -> Result<Vec<u8>>;
+        pub fn ratchet_key(
+            self: &KeyProvider,
+            participant_id: String,
+            key_index: i32,
+        ) -> Result<Vec<u8>>;
 
-        pub fn get_key(self: &KeyProvider, participant_id: String, key_index: i32) -> Result<Vec<u8>>;
+        pub fn get_key(
+            self: &KeyProvider,
+            participant_id: String,
+            key_index: i32,
+        ) -> Result<Vec<u8>>;
     }
 
     unsafe extern "C++" {
@@ -124,11 +137,17 @@ pub mod ffi {
 
         pub fn participant_id(self: &FrameCryptor) -> String;
 
-        pub fn register_observer(self: &FrameCryptor, observer: Box<RtcFrameCryptorObserverWrapper>);
+        pub fn register_observer(
+            self: &FrameCryptor,
+            observer: Box<RtcFrameCryptorObserverWrapper>,
+        );
 
         pub fn unregister_observer(self: &FrameCryptor);
 
-        pub fn set_packet_trailer_handler(self: &FrameCryptor, handler: SharedPtr<PacketTrailerHandler>);
+        pub fn set_packet_trailer_handler(
+            self: &FrameCryptor,
+            handler: SharedPtr<PacketTrailerHandler>,
+        );
     }
 
     unsafe extern "C++" {

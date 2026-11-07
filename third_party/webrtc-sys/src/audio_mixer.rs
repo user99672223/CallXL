@@ -69,7 +69,11 @@ pub mod ffi {
 pub trait AudioMixerSource {
     fn ssrc(&self) -> i32;
     fn preferred_sample_rate(&self) -> i32;
-    fn get_audio_frame_with_info(&self, target_sample_rate: i32, frame: NativeAudioFrame) -> AudioFrameInfo;
+    fn get_audio_frame_with_info(
+        &self,
+        target_sample_rate: i32,
+        frame: NativeAudioFrame,
+    ) -> AudioFrameInfo;
 }
 
 pub struct AudioMixerSourceWrapper {

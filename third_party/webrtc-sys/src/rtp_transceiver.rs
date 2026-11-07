@@ -34,7 +34,8 @@ pub mod ffi {
         type RtpTransceiverDirection = crate::webrtc::ffi::RtpTransceiverDirection;
         type RtpEncodingParameters = crate::rtp_parameters::ffi::RtpEncodingParameters;
         type RtpCodecCapability = crate::rtp_parameters::ffi::RtpCodecCapability;
-        type RtpHeaderExtensionCapability = crate::rtp_parameters::ffi::RtpHeaderExtensionCapability;
+        type RtpHeaderExtensionCapability =
+            crate::rtp_parameters::ffi::RtpHeaderExtensionCapability;
         type RtpSender = crate::rtp_sender::ffi::RtpSender;
         type RtpReceiver = crate::rtp_receiver::ffi::RtpReceiver;
         type RtcError = crate::rtc_error::ffi::RtcError;
@@ -56,10 +57,16 @@ pub mod ffi {
         fn current_direction(self: &RtpTransceiver) -> Result<RtpTransceiverDirection>;
         fn fired_direction(self: &RtpTransceiver) -> Result<RtpTransceiverDirection>;
         fn stop_standard(self: &RtpTransceiver) -> Result<()>;
-        fn set_codec_preferences(self: &RtpTransceiver, codecs: Vec<RtpCodecCapability>) -> Result<()>;
+        fn set_codec_preferences(
+            self: &RtpTransceiver,
+            codecs: Vec<RtpCodecCapability>,
+        ) -> Result<()>;
         fn codec_preferences(self: &RtpTransceiver) -> Vec<RtpCodecCapability>;
-        fn header_extensions_to_negotiate(self: &RtpTransceiver) -> Vec<RtpHeaderExtensionCapability>;
-        fn negotiated_header_extensions(self: &RtpTransceiver) -> Vec<RtpHeaderExtensionCapability>;
+        fn header_extensions_to_negotiate(
+            self: &RtpTransceiver,
+        ) -> Vec<RtpHeaderExtensionCapability>;
+        fn negotiated_header_extensions(self: &RtpTransceiver)
+            -> Vec<RtpHeaderExtensionCapability>;
         fn set_header_extensions_to_negotiate(
             self: &RtpTransceiver,
             headers: Vec<RtpHeaderExtensionCapability>,

@@ -17,7 +17,8 @@ use crate::impl_thread_safety;
 /// Callback invoked for native video publish pipeline timing events.
 pub type OnVideoPublishTiming = Box<dyn Fn(ffi::VideoPublishTimingEvent) + Send + Sync + 'static>;
 /// Callback invoked for native video subscribe pipeline timing events.
-pub type OnVideoSubscribeTiming = Box<dyn Fn(ffi::VideoSubscribeTimingEvent) + Send + Sync + 'static>;
+pub type OnVideoSubscribeTiming =
+    Box<dyn Fn(ffi::VideoSubscribeTimingEvent) + Send + Sync + 'static>;
 
 #[cxx::bridge(namespace = "livekit_ffi")]
 pub mod ffi {
@@ -95,7 +96,10 @@ pub mod ffi {
         );
 
         /// Set a callback for sender-side publish timing events.
-        fn set_publish_timing_observer(self: &PacketTrailerHandler, observer: Box<VideoPublishTimingObserverWrapper>);
+        fn set_publish_timing_observer(
+            self: &PacketTrailerHandler,
+            observer: Box<VideoPublishTimingObserverWrapper>,
+        );
 
         /// Clear the sender-side publish timing callback.
         fn clear_publish_timing_observer(self: &PacketTrailerHandler);
@@ -134,9 +138,15 @@ pub mod ffi {
         type VideoPublishTimingObserverWrapper;
         type VideoSubscribeTimingObserverWrapper;
 
-        fn on_publish_timing(self: &VideoPublishTimingObserverWrapper, event: VideoPublishTimingEvent);
+        fn on_publish_timing(
+            self: &VideoPublishTimingObserverWrapper,
+            event: VideoPublishTimingEvent,
+        );
 
-        fn on_subscribe_timing(self: &VideoSubscribeTimingObserverWrapper, event: VideoSubscribeTimingEvent);
+        fn on_subscribe_timing(
+            self: &VideoSubscribeTimingObserverWrapper,
+            event: VideoSubscribeTimingEvent,
+        );
     }
 }
 

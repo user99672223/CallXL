@@ -17,8 +17,9 @@ pub use cxx::SharedPtr;
 use std::sync::Arc;
 
 use crate::{
-    candidate::ffi::Candidate, data_channel::ffi::DataChannel, impl_thread_safety, jsep::ffi::IceCandidate,
-    media_stream::ffi::MediaStream, rtp_receiver::ffi::RtpReceiver, rtp_transceiver::ffi::RtpTransceiver,
+    candidate::ffi::Candidate, data_channel::ffi::DataChannel, impl_thread_safety,
+    jsep::ffi::IceCandidate, media_stream::ffi::MediaStream, rtp_receiver::ffi::RtpReceiver,
+    rtp_transceiver::ffi::RtpTransceiver,
 };
 
 #[cxx::bridge(namespace = "livekit_ffi")]
@@ -179,7 +180,8 @@ pub mod ffi {
         type PeerConnectionFactory;
 
         fn create_peer_connection_factory() -> SharedPtr<PeerConnectionFactory>;
-        fn create_peer_connection_factory_with_zero_playout_delay() -> SharedPtr<PeerConnectionFactory>;
+        fn create_peer_connection_factory_with_zero_playout_delay(
+        ) -> SharedPtr<PeerConnectionFactory>;
         fn create_peer_connection_factory_with_options(
             zero_playout_delay: bool,
             enable_warp: bool,
@@ -206,13 +208,25 @@ pub mod ffi {
         ) -> SharedPtr<AudioTrack>;
 
         // Create an audio track that uses the ADM for capture (Platform ADM mode)
-        fn create_device_audio_track(self: &PeerConnectionFactory, label: String) -> SharedPtr<AudioTrack>;
+        fn create_device_audio_track(
+            self: &PeerConnectionFactory,
+            label: String,
+        ) -> SharedPtr<AudioTrack>;
 
-        fn rtp_sender_capabilities(self: &PeerConnectionFactory, kind: MediaType) -> RtpCapabilities;
+        fn rtp_sender_capabilities(
+            self: &PeerConnectionFactory,
+            kind: MediaType,
+        ) -> RtpCapabilities;
 
-        fn rtp_receiver_capabilities(self: &PeerConnectionFactory, kind: MediaType) -> RtpCapabilities;
+        fn rtp_receiver_capabilities(
+            self: &PeerConnectionFactory,
+            kind: MediaType,
+        ) -> RtpCapabilities;
 
-        fn video_encoder_backend_codecs(self: &PeerConnectionFactory, backend: VideoEncoderBackend) -> Vec<String>;
+        fn video_encoder_backend_codecs(
+            self: &PeerConnectionFactory,
+            backend: VideoEncoderBackend,
+        ) -> Vec<String>;
 
         // ---- CallXL additions ----
         fn create_peer_connection_callxl(
@@ -246,14 +260,32 @@ pub mod ffi {
         fn on_signaling_change(self: &PeerConnectionObserverWrapper, new_state: SignalingState);
         fn on_add_stream(self: &PeerConnectionObserverWrapper, stream: SharedPtr<MediaStream>);
         fn on_remove_stream(self: &PeerConnectionObserverWrapper, stream: SharedPtr<MediaStream>);
-        fn on_data_channel(self: &PeerConnectionObserverWrapper, data_channel: SharedPtr<DataChannel>);
+        fn on_data_channel(
+            self: &PeerConnectionObserverWrapper,
+            data_channel: SharedPtr<DataChannel>,
+        );
         fn on_renegotiation_needed(self: &PeerConnectionObserverWrapper);
         fn on_negotiation_needed_event(self: &PeerConnectionObserverWrapper, event: u32);
-        fn on_ice_connection_change(self: &PeerConnectionObserverWrapper, new_state: IceConnectionState);
-        fn on_standardized_ice_connection_change(self: &PeerConnectionObserverWrapper, new_state: IceConnectionState);
-        fn on_connection_change(self: &PeerConnectionObserverWrapper, new_state: PeerConnectionState);
-        fn on_ice_gathering_change(self: &PeerConnectionObserverWrapper, new_state: IceGatheringState);
-        fn on_ice_candidate(self: &PeerConnectionObserverWrapper, candidate: SharedPtr<IceCandidate>);
+        fn on_ice_connection_change(
+            self: &PeerConnectionObserverWrapper,
+            new_state: IceConnectionState,
+        );
+        fn on_standardized_ice_connection_change(
+            self: &PeerConnectionObserverWrapper,
+            new_state: IceConnectionState,
+        );
+        fn on_connection_change(
+            self: &PeerConnectionObserverWrapper,
+            new_state: PeerConnectionState,
+        );
+        fn on_ice_gathering_change(
+            self: &PeerConnectionObserverWrapper,
+            new_state: IceGatheringState,
+        );
+        fn on_ice_candidate(
+            self: &PeerConnectionObserverWrapper,
+            candidate: SharedPtr<IceCandidate>,
+        );
         fn on_ice_candidate_error(
             self: &PeerConnectionObserverWrapper,
             address: String,
@@ -262,8 +294,14 @@ pub mod ffi {
             error_code: i32,
             error_text: String,
         );
-        fn on_ice_candidates_removed(self: &PeerConnectionObserverWrapper, removed: Vec<CandidatePtr>);
-        fn on_ice_connection_receiving_change(self: &PeerConnectionObserverWrapper, receiving: bool);
+        fn on_ice_candidates_removed(
+            self: &PeerConnectionObserverWrapper,
+            removed: Vec<CandidatePtr>,
+        );
+        fn on_ice_connection_receiving_change(
+            self: &PeerConnectionObserverWrapper,
+            receiving: bool,
+        );
         fn on_ice_selected_candidate_pair_changed(
             self: &PeerConnectionObserverWrapper,
             event: CandidatePairChangeEvent,
@@ -294,7 +332,14 @@ pub trait PeerConnectionObserver: Send + Sync {
     fn on_connection_change(&self, new_state: ffi::PeerConnectionState);
     fn on_ice_gathering_change(&self, new_state: ffi::IceGatheringState);
     fn on_ice_candidate(&self, candidate: SharedPtr<IceCandidate>);
-    fn on_ice_candidate_error(&self, address: String, port: i32, url: String, error_code: i32, error_text: String);
+    fn on_ice_candidate_error(
+        &self,
+        address: String,
+        port: i32,
+        url: String,
+        error_code: i32,
+        error_text: String,
+    );
     fn on_ice_candidates_removed(&self, removed: Vec<SharedPtr<Candidate>>);
     fn on_ice_connection_receiving_change(&self, receiving: bool);
     fn on_ice_selected_candidate_pair_changed(&self, event: ffi::CandidatePairChangeEvent);
@@ -361,7 +406,14 @@ impl PeerConnectionObserverWrapper {
         self.observer.on_ice_candidate(candidate);
     }
 
-    fn on_ice_candidate_error(&self, address: String, port: i32, url: String, error_code: i32, error_text: String) {
+    fn on_ice_candidate_error(
+        &self,
+        address: String,
+        port: i32,
+        url: String,
+        error_code: i32,
+        error_text: String,
+    ) {
         self.observer.on_ice_candidate_error(address, port, url, error_code, error_text);
     }
 

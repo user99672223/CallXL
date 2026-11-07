@@ -26,7 +26,9 @@ pub mod ffi {
     unsafe extern "C++" {
         include!("livekit/callxl.h");
 
-        fn create_callxl_peer_connection_factory(options: CallXlFactoryOptions) -> SharedPtr<PeerConnectionFactory>;
+        fn create_callxl_peer_connection_factory(
+            options: CallXlFactoryOptions,
+        ) -> SharedPtr<PeerConnectionFactory>;
 
         fn callxl_candidate_info(candidate: &Candidate) -> CallXlCandidateInfo;
     }
