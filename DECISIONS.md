@@ -256,3 +256,15 @@ is unaffected (unusable current pair → libwebrtc decides), and nomination-driv
 always pass. The loopback LAN-start floor is family-aware: 452.4 kbps on IPv4 and
 436.4 kbps on IPv6 are the same 510 kbps BWE start minus packet overhead (CI run
 42344660897 v6: 436.4, 436.4, 510, …).
+
+D-0032 (2026-11-07, phase1) — ICE controller ping-loss estimator: a ping counts as lost
+only once it can no longer be in flight (outstanding = sent − responses, minus the pings
+sent within the last RTT + 50 ms, at least one; monotone). The previous estimator counted
+every unanswered ping at sample time, so a ping in flight read as lost (EWMA jump to 0.3),
+and the prefer-IPv6 rule (loss within 0.5 % of the selected pair) reset its 5 s sustain
+timer: CI run 42345699737 `netem_path_switch_v4_to_v6` never returned to IPv6 in the 45 s
+after the delay cleared, with no controller decision at all after the first switch.
+Local check (proxy backend, `netem_loss_backoff_recovery`, controlling side): 0/1000 on the
+clean path, 234–319/1000 under 5 % packet loss, back to 0 within ~4 s after it cleared.
+`CALLXL_ICE_TRACE=1` logs the policy inputs every 2 s (debug only; it allocates on the
+network thread, so it is off by default).

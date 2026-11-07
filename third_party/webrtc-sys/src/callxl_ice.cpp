@@ -20,6 +20,7 @@
  * through PeerConnectionObserverWrapper::on_ice_controller_decision, which on
  * the Rust side does exactly one try_send.
  */
+#include <cstdlib>
 #include <map>
 #include <string>
 
@@ -30,6 +31,7 @@
 #include "p2p/base/default_ice_transport_factory.h"
 #include "p2p/base/ice_controller_factory_interface.h"
 #include "p2p/base/p2p_transport_channel.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/time_utils.h"
 #include "webrtc-sys/src/peer_connection_factory.rs.h"
 
@@ -45,6 +47,7 @@ struct ConnMetrics {
   size_t last_sent = 0;
   size_t last_recv = 0;
   float loss = 0.f;  // EWMA of per-sample ping loss fraction
+  int64_t lost = 0;  // pings known lost (cumulative)
   int64_t qualifying_since_ms = -1;
   std::string qualifying_reason;
 };
@@ -63,7 +66,8 @@ class CallXlIceController final : public IceControllerInterface {
       : inner_(args),
         role_(args.ice_role_func),
         policy_(policy),
-        observer_(observer) {}
+        observer_(observer),
+        trace_(std::getenv("CALLXL_ICE_TRACE") != nullptr) {}
 
   void SetIceConfig(const webrtc::IceConfig& config) override {
     inner_.SetIceConfig(config);
@@ -121,24 +125,54 @@ class CallXlIceController final : public IceControllerInterface {
   }
 
  private:
+  // Ping loss per connection. A ping counts as lost only once it can no longer be
+  // in flight: lost = outstanding (sent - responses) minus the pings sent within
+  // the last RTT + 50 ms (at least one). Counting every unanswered ping at sample
+  // time instead read pings in flight as lost (EWMA spikes to 0.3 on a loss-free
+  // path), which kept the prefer-IPv6 rule from ever holding for sustain_ms.
   void Sample(int64_t now) {
     for (const Connection* c : inner_.GetConnections()) {
       ConnMetrics& m = metrics_[c];
       if (m.last_sample_ms >= 0 && now - m.last_sample_ms < 250) continue;
       webrtc::ConnectionInfo info = const_cast<Connection*>(c)->stats();
-      const size_t sent = info.sent_ping_requests_total;
-      const size_t recv = info.recv_ping_responses;
-      if (m.last_sample_ms >= 0 && sent > m.last_sent) {
-        const float ds = static_cast<float>(sent - m.last_sent);
-        const float dr = static_cast<float>(recv - m.last_recv);
-        float l = 1.f - dr / ds;
-        if (l < 0.f) l = 0.f;
-        m.loss = 0.7f * m.loss + 0.3f * l;
+      const int64_t sent = static_cast<int64_t>(info.sent_ping_requests_total);
+      const int64_t recv = static_cast<int64_t>(info.recv_ping_responses);
+      if (m.last_sample_ms >= 0 && sent > static_cast<int64_t>(m.last_sent)) {
+        const int64_t ds = sent - static_cast<int64_t>(m.last_sent);
+        const int64_t dt = now - m.last_sample_ms;
+        const int64_t rtt = c->rtt_samples() > 0 ? c->Rtt().ms() : 1000;
+        int64_t in_flight = (ds * (rtt + 50) + dt - 1) / (dt > 0 ? dt : 1);
+        if (in_flight < 1) in_flight = 1;
+        int64_t lost = sent - recv - in_flight;
+        if (lost < m.lost) lost = m.lost;  // monotone: answered pings are not "unlost"
+        const float l = static_cast<float>(lost - m.lost) / static_cast<float>(ds);
+        m.lost = lost;
+        m.loss = 0.7f * m.loss + 0.3f * (l > 1.f ? 1.f : l);
+      } else if (m.last_sample_ms < 0) {
+        m.lost = sent - recv - 1 > 0 ? sent - recv - 1 : 0;
       }
-      m.last_sent = sent;
-      m.last_recv = recv;
+      m.last_sent = static_cast<size_t>(sent);
+      m.last_recv = static_cast<size_t>(recv);
       m.last_sample_ms = now;
     }
+  }
+
+  // Debug trace of the switching policy's inputs (every 2 s, controlling side).
+  // Off unless CALLXL_ICE_TRACE is set (read once): it allocates on the network
+  // thread, which production builds must not do (CLAUDE.md section 10).
+  void Trace(int64_t now) {
+    if (!trace_ || now - last_trace_ms_ < 2000) return;
+    last_trace_ms_ = now;
+    std::string t = "CallXL ICE eval:";
+    for (const Connection* c : inner_.GetConnections()) {
+      const ConnMetrics& m = metrics_[c];
+      t += std::string(" [") + (c == selected_ ? "*" : "") + (IsV6(c) ? "v6" : "v4") +
+           " w" + std::to_string(c->writable()) + " r" + std::to_string(c->receiving()) +
+           " n" + std::to_string(c->rtt_samples()) + " rtt" + std::to_string(c->Rtt().ms()) +
+           " loss" + std::to_string(static_cast<int>(m.loss * 1000)) + "/1000 q" +
+           std::to_string(m.qualifying_since_ms < 0 ? -1 : now - m.qualifying_since_ms) + "]";
+    }
+    RTC_LOG(LS_INFO) << t;
   }
 
   bool Usable(const Connection* c) const {
@@ -197,6 +231,7 @@ class CallXlIceController final : public IceControllerInterface {
     }
 
     // Stable selection: apply the CallXL policy.
+    Trace(now);
     const ConnMetrics& sm = metrics_[selected_];
     const int64_t sel_rtt = selected_->Rtt().ms();
     const Connection* best = nullptr;
@@ -263,6 +298,8 @@ class CallXlIceController final : public IceControllerInterface {
   int64_t first_selected_ms_ = -1;
   int64_t last_switch_ms_ = -1;
   int64_t recheck_pending_until_ms_ = -1;
+  int64_t last_trace_ms_ = -1;
+  const bool trace_;
 };
 
 class CallXlIceControllerFactory final

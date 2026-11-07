@@ -15,7 +15,10 @@ use serde_json::{Value, json};
 
 const CONNECT: Duration = Duration::from_secs(30);
 /// libwebrtc's selected-pair switches in the peer logs (artifacts) for the path tests.
-const ICE_LOG: &[(&str, &str)] = &[("CALLXL_RTC_LOG", "Switching selected connection|Changed selected connection")];
+const ICE_LOG: &[(&str, &str)] = &[
+    ("CALLXL_RTC_LOG", "Switching selected connection|Changed selected connection|CallXL ICE"),
+    ("CALLXL_ICE_TRACE", "1"),
+];
 
 async fn decisions(a: &Peer, b: &Peer) {
     for p in [a, b] {
