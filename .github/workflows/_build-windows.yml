@@ -1,0 +1,149 @@
+# _build-windows — reusable Windows x64 build (CLAUDE.md §8: static CRT, no redistributables).
+#
+# Called by: ci.yml and release.yml.
+# Produces:  artifact `windows-installer` containing CallXL-Setup.exe (Inno Setup,
+#            packaging/windows/callxl.iss), after unit tests, the loopback e2e with the
+#            test ADM and a silent install / launch / uninstall smoke test.
+# Until apps/desktop and packaging/windows/callxl.iss exist the job only reports that and
+# outputs an empty artifact name (release.yml then treats the installer as missing).
+name: _build-windows
+
+on:
+  workflow_call:
+    inputs:
+      upload_artifacts:
+        type: boolean
+        default: true
+      version_tag:
+        description: release tag; prerelease tags stamp their version (scripts/check-version.sh)
+        type: string
+        default: ""
+      bake_app_secret:
+        description: build with the APP_SECRET repository secret (release builds only)
+        type: boolean
+        default: false
+    secrets:
+      APP_SECRET:
+        required: false
+    outputs:
+      installer_artifact:
+        description: artifact name ("" when not built)
+        value: ${{ jobs.build.outputs.artifact }}
+      installer_file:
+        value: ${{ jobs.build.outputs.file }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTFLAGS: -C target-feature=+crt-static
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      artifact: ${{ steps.pkg.outputs.artifact }}
+      file: ${{ steps.pkg.outputs.file }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Desktop app and installer script present?
+        id: present
+        run: |
+          if [[ -f apps/desktop/Cargo.toml && -f packaging/windows/callxl.iss ]]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::apps/desktop or packaging/windows/callxl.iss not present yet: no Windows build"
+          fi
+
+      - name: Version check (release builds)
+        if: steps.present.outputs.ok == 'true' && inputs.version_tag != ''
+        env:
+          TAG: ${{ inputs.version_tag }}
+        run: |
+          if [[ "$TAG" == *-* ]]; then scripts/check-version.sh --stamp "$TAG"; else scripts/check-version.sh "$TAG"; fi
+
+      - name: Rust toolchain (rust-toolchain.toml)
+        if: steps.present.outputs.ok == 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        if: steps.present.outputs.ok == 'true'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.present.outputs.ok == 'true'
+        with:
+          key: windows
+          cache-on-failure: true
+
+      - name: Cache prebuilt libwebrtc
+        if: steps.present.outputs.ok == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/callxl/webrtc-a545de4
+          key: libwebrtc-webrtc-a545de4-win-x64-release
+
+      - name: Fetch libwebrtc (no-op when cached)
+        if: steps.present.outputs.ok == 'true'
+        run: scripts/ci-webrtc-cache.sh win-x64-release
+
+      - name: Unit tests, callxl-cli, loopback e2e (test ADM)
+        if: steps.present.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          cargo test --workspace --exclude callxl-e2e
+          cargo build -p callxl-cli
+          cargo test -p callxl-e2e --test loopback -- loopback_v4_lan_policy --exact --nocapture
+
+      - name: Release build (callxl.exe)
+        if: steps.present.outputs.ok == 'true'
+        env:
+          CALLXL_APP_SECRET: ${{ inputs.bake_app_secret && secrets.APP_SECRET || '' }}
+        run: |
+          if [[ -z "$CALLXL_APP_SECRET" ]]; then unset CALLXL_APP_SECRET; fi
+          cargo build --release -p callxl-desktop
+
+      - name: Inno Setup -> CallXL-Setup.exe
+        id: pkg
+        if: steps.present.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          iscc packaging/windows/callxl.iss
+          exe="$(find . -path ./target/debug -prune -o -name CallXL-Setup.exe -print | head -1)"
+          test -n "$exe"
+          mkdir -p dist && cp "$exe" dist/CallXL-Setup.exe
+          ls -l dist
+          echo "artifact=windows-installer" >> "$GITHUB_OUTPUT"
+          echo "file=CallXL-Setup.exe" >> "$GITHUB_OUTPUT"
+
+      - name: Silent install, launch, uninstall
+        if: steps.present.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Start-Process -Wait -FilePath dist\CallXL-Setup.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\CallXL'
+          $exe = Join-Path $dir 'callxl.exe'
+          if (-not (Test-Path $exe)) { throw "not installed: $exe" }
+          & $exe --version
+          $un = Get-ChildItem $dir -Filter 'unins*.exe' | Select-Object -First 1
+          Start-Process -Wait -FilePath $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          Start-Sleep -Seconds 3
+          if (Test-Path $exe) { throw "uninstall left $exe" }
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.upload_artifacts && steps.pkg.outputs.artifact != ''
+        with:
+          name: windows-installer
+          path: dist/CallXL-Setup.exe
+          if-no-files-found: error

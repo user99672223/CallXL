@@ -1,0 +1,131 @@
+# _netem-matrix — the CLAUDE.md §11 netem scenarios, one parallel job each, real `tc netem`
+# on `lo` (CALLXL_NETEM=tc, D-0003; UDP only, D-0030) on ubuntu-22.04 (IPv4 + IPv6 loopback).
+#
+# Called by: ci.yml (after _build-linux, reusing its `e2e-bins`) and release.yml (gate
+#            before the release job).
+# Produces:  per scenario an artifact `netem-<scenario>` with both peers' logs, recorded
+#            WAVs, stats samples, diagnostics snapshots and the v1 diagnostics export;
+#            the last stats samples go into the job summary.
+# Without `bins_artifact` it builds the binaries once itself (job `bins`).
+name: _netem-matrix
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: git ref to test (scripts/netem.sh comes from it)
+        type: string
+        default: ""
+      bins_artifact:
+        description: artifact with callxl-cli + e2e test executables from this run ("" = build here)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  CC: clang-21
+  CXX: clang++-21
+
+jobs:
+  bins:
+    if: inputs.bins_artifact == ''
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: build
+      - name: Build callxl-cli and the netem test executables
+        run: |
+          set -euo pipefail
+          cargo build -p callxl-cli
+          mkdir -p dist/e2e-bins && cp target/debug/callxl-cli dist/e2e-bins/
+          cargo test -p callxl-e2e --test netem --test chat_files --no-run --message-format=json 2>/dev/null \
+            | jq -r 'select(.profile.test == true and .executable != null and .target.kind == ["test"]) | "\(.executable) \(.target.name)"' \
+            | while read -r exe name; do cp "$exe" "dist/e2e-bins/$name"; done
+          ls -l dist/e2e-bins
+      - uses: actions/upload-artifact@v4
+        with:
+          name: netem-e2e-bins
+          path: dist/e2e-bins
+          retention-days: 3
+          compression-level: 1
+          if-no-files-found: error
+
+  scenario:
+    needs: bins
+    if: ${{ !cancelled() && (needs.bins.result == 'success' || needs.bins.result == 'skipped') }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [internet_ramp, loss_backoff_recovery, frame_adaptation, path_switch_v6_to_v4, path_switch_v4_to_v6, file_throttle]
+        include:
+          - { scenario: internet_ramp, test: netem, filter: netem_internet_ramp }
+          - { scenario: loss_backoff_recovery, test: netem, filter: netem_loss_backoff_recovery }
+          - { scenario: frame_adaptation, test: netem, filter: netem_frame_adaptation }
+          - { scenario: path_switch_v6_to_v4, test: netem, filter: netem_path_switch_v6_to_v4 }
+          - { scenario: path_switch_v4_to_v6, test: netem, filter: netem_path_switch_v4_to_v6 }
+          - { scenario: file_throttle, test: chat_files, filter: file_transfer_throttle_keeps_audio_loss_flat }
+    name: netem ${{ matrix.scenario }}
+    steps:
+      # The test executables locate scripts/netem.sh as <build checkout>/tests/e2e/../../scripts
+      # (the path must exist); GitHub's checkout path is the same on every ubuntu runner.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          sparse-checkout: |
+            scripts
+            tests/e2e
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.bins_artifact != '' && inputs.bins_artifact || 'netem-e2e-bins' }}
+          path: dist/e2e-bins
+
+      - name: ${{ matrix.filter }} (tc netem on lo, as root)
+        env:
+          CALLXL_NETEM: tc
+          CALLXL_CLI: ${{ github.workspace }}/dist/e2e-bins/callxl-cli
+          CALLXL_E2E_ARTIFACTS: ${{ github.workspace }}/e2e-artifacts
+          TEST_BIN: dist/e2e-bins/${{ matrix.test }}
+          FILTER: ${{ matrix.filter }}
+        run: |
+          set -euo pipefail
+          chmod +x dist/e2e-bins/*
+          ip -6 addr show dev lo | grep -q '::1' || { echo "::error::no ::1 on lo"; exit 1; }
+          sudo ip link set lo multicast on
+          status=0
+          # tc needs CAP_NET_ADMIN: run the test executable as root, keeping CI and CALLXL_*.
+          sudo -E env PATH="$PATH" "$TEST_BIN" "$FILTER" --exact --test-threads=1 --nocapture 2>&1 | tee test.log || status=$?
+          sudo chown -R "$(id -u):$(id -g)" e2e-artifacts || true
+          {
+            echo "### netem ${{ matrix.scenario }}: $([[ $status == 0 ]] && echo passed || echo FAILED)"
+            echo '```'
+            grep -E '^(alice|bob) t=|^continuity|controller decisions|^test result' test.log | tail -12 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: netem-${{ matrix.scenario }}
+          path: |
+            e2e-artifacts
+            test.log
+            !e2e-artifacts/assets
+          retention-days: 14
+          if-no-files-found: warn

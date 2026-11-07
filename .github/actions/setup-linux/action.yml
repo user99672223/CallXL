@@ -1,0 +1,49 @@
+# Shared set-up for every Linux job that compiles Rust (ci lint, _build-linux, release):
+# clang 21 (libwebrtc's hermetic libc++, D-0008), the pinned toolchain, sccache, cargo
+# caches and the prebuilt libwebrtc (cached on its tag, D-0010; exports LK_CUSTOM_WEBRTC).
+name: setup-linux
+description: clang 21, Rust toolchain, sccache, rust-cache and the cached prebuilt libwebrtc
+inputs:
+  cache-key:
+    description: rust-cache key, one per job kind (check and build artifacts differ)
+    required: true
+  extra-packages:
+    description: additional apt packages
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: System packages (clang 21, glib headers, PulseAudio)
+      shell: bash
+      env:
+        EXTRA: ${{ inputs.extra-packages }}
+      run: |
+        set -euo pipefail
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+        echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list >/dev/null
+        sudo apt-get update -q
+        # shellcheck disable=SC2086
+        sudo apt-get install -y -q --no-install-recommends clang-21 libglib2.0-dev pkg-config pulseaudio pulseaudio-utils iproute2 $EXTRA
+        clang++-21 --version | head -1
+
+    - name: Rust toolchain (rust-toolchain.toml)
+      shell: bash
+      run: rustup show active-toolchain || rustup toolchain install
+
+    - uses: mozilla-actions/sccache-action@v0.0.9
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.cache-key }}
+        cache-on-failure: true
+
+    - name: Cache prebuilt libwebrtc
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/callxl/webrtc-a545de4
+        key: libwebrtc-webrtc-a545de4-linux-x64-release
+
+    - name: Fetch libwebrtc (no-op when cached)
+      shell: bash
+      run: scripts/ci-webrtc-cache.sh linux-x64-release

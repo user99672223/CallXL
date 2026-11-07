@@ -73,6 +73,7 @@ async fn finish(h: &Harness, a: Peer, b: Peer, samples: &[Value], tail: f64) -> 
     h.save_json("alice-samples.json", &json!(samples));
     h.save_json("alice-diagnostics.json", &a.diagnostics().await?);
     h.save_json("bob-diagnostics.json", &b.diagnostics().await?);
+    h.save_export(&a).await;
     let ra = a.stop().await?;
     let rb = b.stop().await?;
     assert_continuous_tail(&rb, tail)?;

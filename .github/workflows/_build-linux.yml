@@ -1,0 +1,146 @@
+# _build-linux — reusable Linux build (ubuntu-22.04 for glibc compatibility, CLAUDE.md §8).
+#
+# Called by: ci.yml (every push/PR) and release.yml (tags).
+# Produces:  artifact `e2e-bins`  — debug callxl-cli + the e2e test executables, consumed
+#                                   by the e2e and netem jobs (they never recompile);
+#            artifact `linux-deb` — callxl_<ver>_amd64.deb (once apps/desktop exists);
+#            unit tests and the UniFFI Swift bindgen check run here.
+# Lint (fmt/clippy) is a separate job in ci.yml so it runs in parallel with this build.
+name: _build-linux
+
+on:
+  workflow_call:
+    inputs:
+      upload_artifacts:
+        description: upload e2e-bins and linux-deb
+        type: boolean
+        default: true
+      version_tag:
+        description: release tag (e.g. v0.1.0); prerelease tags stamp their version (scripts/check-version.sh)
+        type: string
+        default: ""
+      bake_app_secret:
+        description: build the .deb with the APP_SECRET repository secret (release builds only)
+        type: boolean
+        default: false
+    secrets:
+      APP_SECRET:
+        required: false
+    outputs:
+      bins_artifact:
+        description: name of the e2e binaries artifact
+        value: ${{ jobs.build.outputs.bins_artifact }}
+      deb_artifact:
+        description: name of the .deb artifact ("" when the desktop app does not exist yet)
+        value: ${{ jobs.build.outputs.deb_artifact }}
+      deb_file:
+        description: file name of the .deb
+        value: ${{ jobs.build.outputs.deb_file }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  CC: clang-21
+  CXX: clang++-21
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    outputs:
+      bins_artifact: ${{ steps.bins.outputs.name }}
+      deb_artifact: ${{ steps.deb.outputs.name }}
+      deb_file: ${{ steps.deb.outputs.file }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version check (release builds)
+        if: inputs.version_tag != ''
+        env:
+          TAG: ${{ inputs.version_tag }}
+        run: |
+          if [[ "$TAG" == *-* ]]; then scripts/check-version.sh --stamp "$TAG"; else scripts/check-version.sh "$TAG"; fi
+
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: build
+
+      - name: Build callxl-cli and test binaries
+        run: |
+          cargo build -p callxl-cli
+          cargo test --workspace --no-run
+
+      - name: Unit tests
+        run: cargo test --workspace --exclude callxl-e2e
+
+      - name: Swift bindings generate on Linux (UniFFI)
+        run: |
+          set -euo pipefail
+          cargo rustc -p callxl-core --lib --crate-type cdylib
+          cargo run -q -p callxl-core --features bindgen --bin uniffi-bindgen -- \
+            generate --library target/debug/libcallxl_core.so --language swift --out-dir target/swift-bindings
+          test -s target/swift-bindings/CallXLCore.swift
+          test -s target/swift-bindings/CallXLCoreFFI.h
+          test -s target/swift-bindings/CallXLCoreFFI.modulemap
+
+      - name: Collect e2e binaries (stable names)
+        id: bins
+        run: |
+          set -euo pipefail
+          mkdir -p dist/e2e-bins
+          cp target/debug/callxl-cli dist/e2e-bins/
+          cargo test -p callxl-e2e --no-run --message-format=json 2>/dev/null \
+            | jq -r 'select(.profile.test == true and .executable != null and .target.kind == ["test"]) | "\(.executable) \(.target.name)"' \
+            | while read -r exe name; do cp "$exe" "dist/e2e-bins/$name"; done
+          ls -l dist/e2e-bins
+          echo "name=e2e-bins" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.upload_artifacts
+        with:
+          name: e2e-bins
+          path: dist/e2e-bins
+          retention-days: 7
+          compression-level: 1
+          if-no-files-found: error
+
+      - uses: taiki-e/install-action@v2
+        if: hashFiles('apps/desktop/Cargo.toml') != ''
+        with:
+          tool: cargo-deb
+
+      # Desktop .deb (owned by the desktop app: apps/desktop, packaging/linux). Skipped
+      # until that crate exists so this workflow is usable before it lands.
+      - name: Desktop .deb (cargo deb -p callxl-desktop)
+        id: deb
+        env:
+          CALLXL_APP_SECRET: ${{ inputs.bake_app_secret && secrets.APP_SECRET || '' }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f apps/desktop/Cargo.toml ]]; then
+            echo "::notice::apps/desktop not present yet: no .deb"
+            echo "name=" >> "$GITHUB_OUTPUT"; echo "file=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ -z "$CALLXL_APP_SECRET" ]]; then unset CALLXL_APP_SECRET; fi
+          cargo deb -p callxl-desktop
+          deb="$(find target/debian -maxdepth 1 -name "callxl_*_amd64.deb" | head -1)"
+          test -n "$deb"
+          dpkg -I "$deb"
+          echo "name=linux-deb" >> "$GITHUB_OUTPUT"
+          echo "file=$(basename "$deb")" >> "$GITHUB_OUTPUT"
+          mkdir -p dist/deb && cp "$deb" dist/deb/
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.upload_artifacts && steps.deb.outputs.name != ''
+        with:
+          name: linux-deb
+          path: dist/deb/*.deb
+          if-no-files-found: error
