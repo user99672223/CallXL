@@ -14,11 +14,6 @@ name: release
 on:
   push:
     tags: ["v*"]
-    # TEMPORARY (removed in the next commit): registers this workflow so the API accepts
-    # workflow_dispatch while it exists only off the default branch. Branch pushes skip
-    # every job (see meta's `if:`).
-    branches: ["p2/infra-qa"]
-    paths: [".github/workflows/release.yml"]
   workflow_dispatch:
     inputs:
       tag:
@@ -39,7 +34,6 @@ permissions:
 
 jobs:
   meta:
-    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     outputs:
@@ -62,6 +56,16 @@ jobs:
     uses: ./.github/workflows/_build-linux.yml
     with:
       upload_artifacts: true
+      package: false
+      version_tag: ${{ needs.meta.outputs.tag }}
+    secrets: inherit
+
+  linux-package:
+    needs: meta
+    uses: ./.github/workflows/_build-linux.yml
+    with:
+      upload_artifacts: true
+      build_tests: false
       version_tag: ${{ needs.meta.outputs.tag }}
       bake_app_secret: true
     secrets: inherit
@@ -92,7 +96,7 @@ jobs:
       bins_artifact: ${{ needs.linux.outputs.bins_artifact }}
 
   release:
-    needs: [meta, linux, windows, macos, netem]
+    needs: [meta, linux, linux-package, windows, macos, netem]
     # Runs when the gates passed; a failed or skipped platform build is judged below.
     if: ${{ !cancelled() && needs.meta.result == 'success' && needs.linux.result == 'success' && needs.netem.result == 'success' }}
     runs-on: ubuntu-22.04
@@ -116,9 +120,10 @@ jobs:
           ALLOW_PARTIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_partial }}
           WIN: ${{ needs.windows.result }}
           MAC: ${{ needs.macos.result }}
+          DEB: ${{ needs.linux-package.result }}
         run: |
           set -euo pipefail
-          mkdir -p out
+          mkdir -p out dl
           deb="$(find dl -name 'callxl_*_amd64.deb' | head -1)"
           # cargo-deb writes prerelease versions Debian-style (0.1.0~rc1); the asset keeps
           # the tag's spelling, callxl_<ver>_amd64.deb (CLAUDE.md §12).
@@ -129,7 +134,7 @@ jobs:
           for f in CallXL-Setup.exe "callxl_${VERSION}_amd64.deb" CallXL-unsigned.ipa; do
             [[ -s "out/$f" ]] || missing+=("$f")
           done
-          echo "windows job: $WIN, macos job: $MAC"
+          echo "linux-package job: $DEB, windows job: $WIN, macos job: $MAC"
           if (( ${#missing[@]} )); then
             if [[ "$ALLOW_PARTIAL" == "true" ]]; then
               echo "::warning::allow_partial: releasing without ${missing[*]}"
@@ -138,8 +143,13 @@ jobs:
               exit 1
             fi
           fi
-          [[ -n "$(ls -A out)" ]] || { echo "::error::no artifacts at all"; exit 1; }
-          (cd out && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          if [[ -n "$(ls -A out)" ]]; then
+            (cd out && sha256sum -- * > SHA256SUMS.txt)
+          else
+            # allow_partial dry-run before any platform package exists.
+            echo "# no release artifacts in this dry-run (allow_partial)" > out/SHA256SUMS.txt
+          fi
+          cat out/SHA256SUMS.txt
           ls -l out
 
       - name: Release notes (commits since the previous tag + install one-liners)
