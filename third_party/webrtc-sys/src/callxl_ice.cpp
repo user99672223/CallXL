@@ -43,6 +43,10 @@ using webrtc::Connection;
 using webrtc::IceControllerInterface;
 using webrtc::IceSwitchReason;
 
+// Why an alternative pair currently qualifies for a switch. Formatted into a
+// string only when a switch is actually made (no allocation per recheck).
+enum class Why : uint8_t { kNone, kRtt, kLoss, kPreferV6 };
+
 struct ConnMetrics {
   int64_t last_sample_ms = -1;
   size_t last_sent = 0;
@@ -52,7 +56,7 @@ struct ConnMetrics {
   int rtt_n = 0;       // rtt_samples() at the last RTT update
   float rtt_ms = -1.f; // EWMA (0.7 new) of the latest per-response RTT
   int64_t qualifying_since_ms = -1;
-  std::string qualifying_reason;
+  Why why = Why::kNone;
 };
 
 constexpr int64_t kControlledFlapGuardMs = 1000;
@@ -88,7 +92,12 @@ class CallXlIceController final : public IceControllerInterface {
       selected_ = nullptr;
     }
   }
-  void AddConnection(const Connection* c) override { inner_.AddConnection(c); }
+  // Metrics nodes are created here and erased in OnConnectionDestroyed, so the
+  // recheck path (Sample/RttMs/Filter) only looks them up and never inserts.
+  void AddConnection(const Connection* c) override {
+    inner_.AddConnection(c);
+    metrics_.emplace(c, ConnMetrics{});
+  }
   void OnConnectionDestroyed(const Connection* c) override {
     inner_.OnConnectionDestroyed(c);
     metrics_.erase(c);
@@ -135,7 +144,9 @@ class CallXlIceController final : public IceControllerInterface {
   // path), which kept the prefer-IPv6 rule from ever holding for sustain_ms.
   void Sample(int64_t now) {
     for (const Connection* c : inner_.GetConnections()) {
-      ConnMetrics& m = metrics_[c];
+      ConnMetrics* mp = Find(c);
+      if (!mp) continue;
+      ConnMetrics& m = *mp;
       if (m.last_sample_ms >= 0 && now - m.last_sample_ms < 250) continue;
       webrtc::ConnectionInfo info = const_cast<Connection*>(c)->stats();
       const int64_t sent = static_cast<int64_t>(info.sent_ping_requests_total);
@@ -178,7 +189,7 @@ class CallXlIceController final : public IceControllerInterface {
     last_trace_ms_ = now;
     std::string t = "CallXL ICE eval:";
     for (const Connection* c : inner_.GetConnections()) {
-      const ConnMetrics& m = metrics_[c];
+      const ConnMetrics& m = Get(c);
       t += std::string(" [") + (c == selected_ ? "*" : "") + (IsV6(c) ? "v6" : "v4") +
            " w" + std::to_string(c->writable()) + " r" + std::to_string(c->receiving()) +
            " n" + std::to_string(c->rtt_samples()) + " rtt" + std::to_string(c->Rtt().ms()) + "/" +
@@ -189,8 +200,18 @@ class CallXlIceController final : public IceControllerInterface {
     RTC_LOG(LS_INFO) << t;
   }
 
+  ConnMetrics* Find(const Connection* c) {
+    auto it = metrics_.find(c);
+    return it == metrics_.end() ? nullptr : &it->second;
+  }
+  const ConnMetrics& Get(const Connection* c) {
+    static const ConnMetrics kEmpty;
+    const ConnMetrics* m = Find(c);
+    return m ? *m : kEmpty;
+  }
+
   int64_t RttMs(const Connection* c) {
-    const ConnMetrics& m = metrics_[c];
+    const ConnMetrics& m = Get(c);
     return m.rtt_ms >= 0.f ? static_cast<int64_t>(m.rtt_ms + 0.5f) : c->Rtt().ms();
   }
 
@@ -270,34 +291,30 @@ class CallXlIceController final : public IceControllerInterface {
 
     // Stable selection: apply the CallXL policy.
     Trace(now);
-    const ConnMetrics& sm = metrics_[selected_];
+    const ConnMetrics& sm = Get(selected_);
     const int64_t sel_rtt = RttMs(selected_);
     const Connection* best = nullptr;
     int64_t best_since = INT64_MAX;
-    std::string best_reason;
     for (const Connection* c : inner_.GetConnections()) {
       if (c == selected_) continue;
-      ConnMetrics& m = metrics_[c];
-      bool qualifies = false;
-      std::string why;
+      ConnMetrics* mp = Find(c);
+      if (!mp) continue;
+      ConnMetrics& m = *mp;
+      m.why = Why::kNone;
       if (Usable(c) && c->local_candidate().component() ==
                            selected_->local_candidate().component()) {
         const int64_t rtt = RttMs(c);
         if (sel_rtt - rtt >= policy_.rtt_delta_ms) {
-          qualifies = true;
-          why = "rtt " + std::to_string(sel_rtt) + "->" + std::to_string(rtt) + " ms";
+          m.why = Why::kRtt;
         } else if (sm.loss - m.loss >= policy_.loss_delta) {
-          qualifies = true;
-          why = "loss " + std::to_string(static_cast<int>(sm.loss * 100)) + "->" +
-                std::to_string(static_cast<int>(m.loss * 100)) + " %";
+          m.why = Why::kLoss;
         } else if (IsV6(c) && !IsV6(selected_) &&
                    rtt <= sel_rtt + policy_.v6_bonus_ms &&
                    m.loss <= sm.loss + 0.005f) {
-          qualifies = true;
-          why = "prefer-ipv6";
+          m.why = Why::kPreferV6;
         }
       }
-      if (!qualifies) {
+      if (m.why == Why::kNone) {
         m.qualifying_since_ms = -1;
         continue;
       }
@@ -305,7 +322,6 @@ class CallXlIceController final : public IceControllerInterface {
       if (m.qualifying_since_ms < best_since) {
         best_since = m.qualifying_since_ms;
         best = c;
-        best_reason = why;
       }
     }
 
@@ -317,8 +333,26 @@ class CallXlIceController final : public IceControllerInterface {
       recheck_pending_until_ms_ = now + policy_.recheck_ms;
       r.recheck_event = webrtc::IceRecheckEvent(
           IceSwitchReason::ICE_CONTROLLER_RECHECK, policy_.recheck_ms);
+      // The only string formatting on this path: once per switch.
+      const ConnMetrics& bm = Get(best);
+      std::string reason;
+      switch (bm.why) {
+        case Why::kRtt:
+          reason = "rtt " + std::to_string(sel_rtt) + "->" +
+                   std::to_string(RttMs(best)) + " ms";
+          break;
+        case Why::kLoss:
+          reason = "loss " + std::to_string(static_cast<int>(sm.loss * 100)) +
+                   "->" + std::to_string(static_cast<int>(bm.loss * 100)) + " %";
+          break;
+        case Why::kPreferV6:
+          reason = "prefer-ipv6";
+          break;
+        case Why::kNone:
+          break;
+      }
       Report(std::string(IsV6(selected_) ? "v6" : "v4") + "->" +
-             (IsV6(best) ? "v6" : "v4") + ": " + best_reason);
+             (IsV6(best) ? "v6" : "v4") + ": " + reason);
       return r;
     }
     // Suppress libwebrtc's own priority-based re-sorting; re-evaluate soon.
