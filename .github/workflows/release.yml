@@ -1,0 +1,176 @@
+# release — turns a tag into a GitHub Release (CLAUDE.md §12).
+#
+# Triggers: push of a tag `v*`; workflow_dispatch with `tag` (dry-runs: the Release and
+#           tag are created at the dispatched commit).
+# Produces: a Release `<tag>` with CallXL-Setup.exe, callxl_<ver>_amd64.deb,
+#           CallXL-unsigned.ipa and SHA256SUMS.txt; prerelease when the tag has a
+#           `-<pre>` suffix (e.g. v0.1.0-rc1). Body: commits since the previous tag plus
+#           the install one-liners from HANDOFF.md.
+# Gates:    version check (scripts/check-version.sh; prerelease tags stamp their version),
+#           the three platform builds (their unit/e2e/Simulator tests), the netem matrix.
+#           A missing artifact fails the release unless `allow_partial` (dispatch only).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: tag to release, e.g. v0.0.1-rc (created at this commit if absent)
+        required: true
+        type: string
+      allow_partial:
+        description: publish even if a platform artifact is missing (dry-runs before all platforms exist)
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  meta:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.m.outputs.tag }}
+      version: ${{ steps.m.outputs.version }}
+      prerelease: ${{ steps.m.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag, version, prerelease (fails early on a version mismatch)
+        id: m
+        env:
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG" == *-* ]]; then pre=true; scripts/check-version.sh --stamp "$TAG"; else pre=false; scripts/check-version.sh "$TAG"; fi
+          { echo "tag=$TAG"; echo "version=${TAG#v}"; echo "prerelease=$pre"; } | tee -a "$GITHUB_OUTPUT"
+
+  linux:
+    needs: meta
+    uses: ./.github/workflows/_build-linux.yml
+    with:
+      upload_artifacts: true
+      version_tag: ${{ needs.meta.outputs.tag }}
+      bake_app_secret: true
+    secrets: inherit
+
+  windows:
+    needs: meta
+    uses: ./.github/workflows/_build-windows.yml
+    with:
+      upload_artifacts: true
+      version_tag: ${{ needs.meta.outputs.tag }}
+      bake_app_secret: true
+    secrets: inherit
+
+  macos:
+    needs: meta
+    uses: ./.github/workflows/_build-macos.yml
+    with:
+      upload_artifacts: true
+      version_tag: ${{ needs.meta.outputs.tag }}
+      bake_app_secret: true
+    secrets: inherit
+
+  netem:
+    needs: linux
+    uses: ./.github/workflows/_netem-matrix.yml
+    with:
+      ref: ${{ github.sha }}
+      bins_artifact: ${{ needs.linux.outputs.bins_artifact }}
+
+  release:
+    needs: [meta, linux, windows, macos, netem]
+    # Runs when the gates passed; a failed or skipped platform build is judged below.
+    if: ${{ !cancelled() && needs.meta.result == 'success' && needs.linux.result == 'success' && needs.netem.result == 'success' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+          pattern: "{linux-deb,windows-installer,ios-ipa}"
+
+      - name: Verify the three artifacts, SHA256SUMS.txt
+        id: files
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          ALLOW_PARTIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_partial }}
+          WIN: ${{ needs.windows.result }}
+          MAC: ${{ needs.macos.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          deb="$(find dl -name 'callxl_*_amd64.deb' | head -1)"
+          # cargo-deb writes prerelease versions Debian-style (0.1.0~rc1); the asset keeps
+          # the tag's spelling, callxl_<ver>_amd64.deb (CLAUDE.md §12).
+          if [[ -n "$deb" ]]; then cp "$deb" "out/callxl_${VERSION}_amd64.deb"; fi
+          exe="$(find dl -name CallXL-Setup.exe | head -1)";   if [[ -n "$exe" ]]; then cp "$exe" out/; fi
+          ipa="$(find dl -name CallXL-unsigned.ipa | head -1)"; if [[ -n "$ipa" ]]; then cp "$ipa" out/; fi
+          missing=()
+          for f in CallXL-Setup.exe "callxl_${VERSION}_amd64.deb" CallXL-unsigned.ipa; do
+            [[ -s "out/$f" ]] || missing+=("$f")
+          done
+          echo "windows job: $WIN, macos job: $MAC"
+          if (( ${#missing[@]} )); then
+            if [[ "$ALLOW_PARTIAL" == "true" ]]; then
+              echo "::warning::allow_partial: releasing without ${missing[*]}"
+            else
+              echo "::error::missing release artifacts: ${missing[*]} (windows job: $WIN, macos job: $MAC)"
+              exit 1
+            fi
+          fi
+          [[ -n "$(ls -A out)" ]] || { echo "::error::no artifacts at all"; exit 1; }
+          (cd out && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          ls -l out
+
+      - name: Release notes (commits since the previous tag + install one-liners)
+        env:
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          prev="$(git describe --tags --abbrev=0 --exclude "$TAG" HEAD 2>/dev/null || true)"
+          {
+            echo "## CallXL $TAG"
+            echo
+            if [[ -n "$prev" ]]; then echo "### Changes since $prev"; range="$prev..HEAD"; else echo "### Changes"; range="HEAD"; fi
+            echo
+            git log --no-merges --pretty='- %s (%h)' "$range" | head -200
+            echo
+            echo "### Install"
+            echo
+            if [[ -f HANDOFF.md ]] && grep -q '<!-- install:begin -->' HANDOFF.md; then
+              sed -n '/<!-- install:begin -->/,/<!-- install:end -->/p' HANDOFF.md | sed '1d;$d' | sed "s/<ver>/$VERSION/g"
+            else
+              echo "- Windows: run \`CallXL-Setup.exe\`"
+              echo "- Linux: \`sudo apt install ./callxl_${VERSION}_amd64.deb\`"
+              echo "- iOS: sideload \`CallXL-unsigned.ipa\` with AltStore or Sideloadly"
+            fi
+            echo
+            echo "Checksums: \`SHA256SUMS.txt\` (\`sha256sum -c SHA256SUMS.txt\`)."
+          } > notes.md
+          cat notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: CallXL ${{ needs.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          body_path: notes.md
+          draft: false
+          prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: out/*

@@ -90,6 +90,20 @@ impl Harness {
     pub fn save_json(&self, file: &str, v: &Value) {
         let _ = std::fs::write(self.dir.join(file), serde_json::to_string_pretty(v).unwrap_or_default());
     }
+
+    /// Stores `p`'s diagnostics export (schema v1) as `<name>-export.json` next to the
+    /// recordings (CI uploads both per scenario). Schema validity itself is asserted by
+    /// `diagnostics_complete`; here a violation is only reported.
+    pub async fn save_export(&self, p: &Peer) {
+        let Ok(text) = p.call("export_diagnostics", Value::Null).await else { return };
+        let text = text.as_str().unwrap_or_default();
+        if let Ok(v) = serde_json::from_str::<Value>(text)
+            && let Err(e) = diag_schema::validate(&v)
+        {
+            eprintln!("{}: export violates schema v1: {e:?}", p.name);
+        }
+        let _ = std::fs::write(self.dir.join(format!("{}-export.json", p.name)), text);
+    }
 }
 
 #[derive(Clone, Debug, Default)]
