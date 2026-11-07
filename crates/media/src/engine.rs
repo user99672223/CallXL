@@ -106,9 +106,11 @@ pub struct EngineOptions {
 /// - `WebRTC-Audio-AlrProbing` + `WebRTC-AlrDetectorParameters`: the audio stream requests
 ///   ALR probing, and ALR is detected as soon as audio uses < 95 % of the estimate (the
 ///   default 65 % needs the estimate at ~1.5× the saturated Opus rate before probing).
-/// - `WebRTC-Bwe-LossBasedBweV2` instant upper bound `15 kbps / (avg_loss - 1 %)`: audio
-///   backs off under sustained random loss (5 % → ≈ 375 kbps BWE cap, 8 % → ≈ 214) and is
-///   untouched below ~3 % loss; the default (`5 % offset, 75 kbps`) never reacted to 5 %.
+/// - `WebRTC-Bwe-LossBasedBweV2` instant upper bound `10 kbps / (avg_loss - 1 %)`: audio
+///   backs off under sustained random loss (5 % → ≈ 250 kbps BWE cap, 8 % → ≈ 143) and is
+///   untouched below ~2.7 % loss; the default (`5 % offset, 75 kbps`) never reacted to 5 %.
+///   15 kbps (D-0022) put 5 % loss at ≈ 375 kbps, i.e. right at a 30 % back-off, so the
+///   outcome depended on the ±1 % noise of the loss estimate (DECISIONS.md D-0161).
 ///
 /// `WebRTC-Audio-SendSideBwe` / `WebRTC-SendSideBwe-WithOverhead` no longer exist: audio
 /// send-side BWE is on whenever transport-cc is negotiated and overhead accounting is the
@@ -117,7 +119,7 @@ pub const DEFAULT_FIELD_TRIALS: &str = "WebRTC-Audio-Allocation/min:32kbps,max:6
 WebRTC-Audio-AlrProbing/Enabled/\
 WebRTC-Bwe-ProbingConfiguration/p1:1.0,p2:0,further_probe_threshold:1000,probe_max_allocation:false,alr_interval:2s/\
 WebRTC-AlrDetectorParameters/bw_usage:0.95,start:0.2,stop:0.1/\
-WebRTC-Bwe-LossBasedBweV2/InstantUpperBoundBwBalance:15kbps,InstantUpperBoundLossOffset:0.01/";
+WebRTC-Bwe-LossBasedBweV2/InstantUpperBoundBwBalance:10kbps,InstantUpperBoundLossOffset:0.01/";
 
 impl Default for EngineOptions {
     fn default() -> Self {
@@ -413,7 +415,7 @@ mod tests {
         assert_eq!(engine.field_trial("WebRTC-Audio-AlrProbing"), "Enabled");
         assert_eq!(
             engine.field_trial("WebRTC-Bwe-LossBasedBweV2"),
-            "InstantUpperBoundBwBalance:15kbps,InstantUpperBoundLossOffset:0.01"
+            "InstantUpperBoundBwBalance:10kbps,InstantUpperBoundLossOffset:0.01"
         );
         assert_eq!(engine.field_trial("WebRTC-Does-Not-Exist"), "");
     }
