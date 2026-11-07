@@ -1,0 +1,16 @@
+/target
+/target-*
+**/*.rs.bk
+*.pdb
+/infra/worker/node_modules
+/infra/worker/.wrangler
+/infra/worker/dist
+/apps/ios/build
+/apps/ios/DerivedData
+*.xcframework
+*.ipa
+*.deb
+*.exe
+.DS_Store
+/dist
+/artifacts
