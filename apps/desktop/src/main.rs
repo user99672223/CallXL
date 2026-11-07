@@ -58,8 +58,42 @@ thread_local! {
     static SHOW: RefCell<Option<slint::Weak<AppWindow>>> = const { RefCell::new(None) };
 }
 
+/// Windows: the release exe is a GUI-subsystem program; attach to the parent console so
+/// `--version` / `--headless-smoke` output is visible from a terminal, and set the
+/// AppUserModelID toasts and the taskbar use (the installer's shortcut carries the same).
+#[cfg(windows)]
+fn windows_init() {
+    use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+    let id: Vec<u16> = callxl_desktop::APP_ID.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: plain Win32 calls with a NUL-terminated UTF-16 string that outlives them.
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+        SetCurrentProcessExplicitAppUserModelID(id.as_ptr());
+    }
+}
+
+/// Linux: WM_CLASS / Wayland app id "CallXL", matching `StartupWMClass` in callxl.desktop
+/// so docks group the window with its launcher icon.
+#[cfg(target_os = "linux")]
+fn select_backend() {
+    use slint::winit_030::winit::platform::{wayland::WindowAttributesExtWayland, x11::WindowAttributesExtX11};
+    let r = slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .with_winit_window_attributes_hook(|a| {
+            let a = WindowAttributesExtX11::with_name(a, "callxl", "CallXL");
+            WindowAttributesExtWayland::with_name(a, "callxl", "CallXL")
+        })
+        .select();
+    if let Err(e) = r {
+        eprintln!("callxl: {e}");
+    }
+}
+
 fn main() {
     let t0 = Instant::now();
+    #[cfg(windows)]
+    windows_init();
     let args = parse_args();
     let smoke = args.headless_smoke;
     let data_dir = match (&args.data_dir, smoke) {
@@ -88,6 +122,8 @@ fn main() {
     }
 
     let prefs = platform::load_prefs(&data_dir);
+    #[cfg(target_os = "linux")]
+    select_backend();
     let win = AppWindow::new().expect("could not create the main window");
     bridge::init_models(&win);
     win.global::<Colors>().set_dark(prefs.dark);

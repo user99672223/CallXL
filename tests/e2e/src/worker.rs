@@ -27,8 +27,8 @@ impl LocalWorker {
             bail!("{} missing: run `npm ci` in infra/worker", wrangler.display());
         }
         let log = std::fs::File::create(log)?;
-        let child = Command::new(wrangler)
-            .current_dir(&dir)
+        let mut cmd = Command::new(wrangler);
+        cmd.current_dir(&dir)
             .args([
                 "dev",
                 "--local",
@@ -44,11 +44,11 @@ impl LocalWorker {
             .stdin(Stdio::null())
             .stdout(Stdio::from(log.try_clone()?))
             .stderr(Stdio::from(log))
-            .kill_on_drop(true)
-            // Own process group: wrangler's workerd children are killed with it on drop.
-            .process_group(0)
-            .spawn()
-            .context("spawn wrangler")?;
+            .kill_on_drop(true);
+        // Own process group: wrangler's workerd children are killed with it on drop.
+        #[cfg(unix)]
+        cmd.process_group(0);
+        let child = cmd.spawn().context("spawn wrangler")?;
         let deadline = Instant::now() + Duration::from_secs(90);
         loop {
             if let Ok(mut s) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {

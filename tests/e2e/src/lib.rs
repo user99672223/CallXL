@@ -29,7 +29,10 @@ pub fn cli_path() -> PathBuf {
     }
     let exe = std::env::current_exe().expect("current exe");
     // target/<profile>/deps/<test> -> target/<profile>/callxl-cli
-    exe.parent().and_then(Path::parent).map(|p| p.join("callxl-cli")).expect("cli path")
+    exe.parent()
+        .and_then(Path::parent)
+        .map(|p| p.join(format!("callxl-cli{}", std::env::consts::EXE_SUFFIX)))
+        .expect("cli path")
 }
 
 pub fn artifacts_root() -> PathBuf {
