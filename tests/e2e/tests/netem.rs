@@ -219,7 +219,13 @@ async fn netem_path_switch_v6_to_v4() -> Result<()> {
     ensure!(switched.is_some_and(|t| t <= 10.0), "no switch to IPv4 within 10 s");
     ensure!(last["pair_switches"] == 1, "expected exactly one switch, got {}", last["pair_switches"]);
     netem.clear()?;
-    finish(&h, a, b, &s, 14.0).await
+    // Continuity is asserted from 1 s after the delay step to the end: that span holds the
+    // switch (≈ 7 s after the step) and everything after it. The step itself (0 → 60 ms
+    // one-way on the active path) starves any jitter buffer for up to 60 ms; that is the
+    // injected network event, not the switch (CI run 42355062935: 25 ms gap exactly at the
+    // step, 5.8 s before the switch; none at the switch). See DECISIONS.md.
+    let tail = (Instant::now() - t0).as_secs_f64() - degrade - 1.0;
+    finish(&h, a, b, &s, tail).await
 }
 
 /// Mirror case: IPv6 is degraded from the start (call moves to IPv4), then IPv6 clears;

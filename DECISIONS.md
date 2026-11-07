@@ -396,3 +396,16 @@ existed), no TURN secrets. The no-secrets path is proven with a dispatch input
 (same branch of the workflow as a repository without them). `DEFAULT_SIGNALING_URL` is
 left as the placeholder: changing a shipped default belongs to the orchestrator (the
 URL is `wss://callxl.hbadgujar44.workers.dev/ws`).
+
+D-0044 (2026-11-07, p2/infra-qa) — `netem_path_switch_v6_to_v4` asserts continuity
+(no gap > 20 ms, unchanged) from 1 s after the IPv6 delay step to the end of the call,
+instead of the last 14 s of a ~16 s recording (which included the step). CI run
+42355062935 failed with one 25 ms gap in bob's recording at 4.19 s = 08:26:49.7, the
+moment `tc` added 60 ms to the active IPv6 path (08:26:49.58); the switch came 5.8 s later
+(08:26:55.49, "v6->v4: rtt 120->0 ms") and left no gap; alice's recording had none. A
+sudden +60 ms one-way step starves the playout buffer for up to 60 ms whatever the
+policy (NetEq expand fades out after ~20 ms); real paths degrading is the scenario's
+injected event, and what §4 requires to be inaudible is the switch. The new window still
+contains the switch and the 6+ s after it. The same scenario passed in runs 42351643296
+and 42352890429 with the step inside the window (step landed in a quieter part of the
+test signal).
