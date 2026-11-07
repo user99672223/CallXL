@@ -114,6 +114,13 @@ jobs:
           compression-level: 1
           if-no-files-found: error
 
+      - uses: actions/upload-artifact@v4
+        if: always() && hashFiles('apps/desktop/Cargo.toml') != ''
+        with:
+          name: desktop-screens
+          path: target/screens
+          if-no-files-found: ignore
+
   # Desktop .deb (apps/desktop, packaging/linux are the desktop app's; this only drives them).
   package:
     if: inputs.package

@@ -72,6 +72,12 @@ jobs:
         run: |
           if [[ "$TAG" == *-* ]]; then scripts/check-version.sh --stamp "$TAG"; else scripts/check-version.sh "$TAG"; fi
 
+      # cl.exe, link.exe, rc.exe, dumpbin on PATH (vcvars64): cc-rs and sccache need them.
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: steps.present.outputs.ok == 'true'
+        with:
+          arch: x64
+
       - name: Rust toolchain (rust-toolchain.toml)
         if: steps.present.outputs.ok == 'true'
         run: rustup show active-toolchain || rustup toolchain install
