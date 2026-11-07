@@ -340,18 +340,27 @@ async fn main() -> Result<()> {
     let card = core.device_card();
     let control = args.control.clone();
     let lan = core.lan_addr().map(|a| a.to_string());
-    if let Some(path) = control.strip_prefix("unix://") {
-        let _ = std::fs::remove_file(path);
-        let listener = tokio::net::UnixListener::bind(path).with_context(|| format!("bind {path}"))?;
-        println!("{}", json!({"ready": true, "control": control, "lan": lan, "key": card.signing_key}));
-        let (c, t, st, bl) = (core.clone(), ev_tx.clone(), stop.clone(), backlog.clone());
-        tokio::spawn(async move {
-            while let Ok((sock, _)) = listener.accept().await {
-                let (r, w) = sock.into_split();
-                let (rx, replay) = attach(&t, &bl);
-                tokio::spawn(serve_conn(c.clone(), r, w, rx, replay, st.clone()));
-            }
-        });
+    #[cfg(unix)]
+    let unix_path = control.strip_prefix("unix://");
+    #[cfg(not(unix))]
+    let unix_path: Option<&str> = None;
+    if let Some(path) = unix_path {
+        #[cfg(unix)]
+        {
+            let _ = std::fs::remove_file(path);
+            let listener = tokio::net::UnixListener::bind(path).with_context(|| format!("bind {path}"))?;
+            println!("{}", json!({"ready": true, "control": control, "lan": lan, "key": card.signing_key}));
+            let (c, t, st, bl) = (core.clone(), ev_tx.clone(), stop.clone(), backlog.clone());
+            tokio::spawn(async move {
+                while let Ok((sock, _)) = listener.accept().await {
+                    let (r, w) = sock.into_split();
+                    let (rx, replay) = attach(&t, &bl);
+                    tokio::spawn(serve_conn(c.clone(), r, w, rx, replay, st.clone()));
+                }
+            });
+        }
+        #[cfg(not(unix))]
+        let _ = path;
     } else if let Some(addr) = control.strip_prefix("tcp://") {
         let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("bind {addr}"))?;
         let bound = listener.local_addr()?;

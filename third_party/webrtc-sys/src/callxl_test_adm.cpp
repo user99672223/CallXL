@@ -10,7 +10,11 @@
  *   the audio thread performs no allocation, no logging and takes no lock: all
  *   shared state is atomics. Control calls come from the worker thread.
  */
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <time.h>
+#endif
 
 #include <atomic>
 #include <cstdio>
@@ -90,11 +94,51 @@ bool WriteWav(const std::string& path, const int16_t* data, size_t samples) {
   return std::fclose(f) == 0;
 }
 
+#ifdef _WIN32
+int64_t NowUs() {
+  static const int64_t freq = [] {
+    LARGE_INTEGER f;
+    QueryPerformanceFrequency(&f);
+    return static_cast<int64_t>(f.QuadPart);
+  }();
+  LARGE_INTEGER c;
+  QueryPerformanceCounter(&c);
+  return static_cast<int64_t>(c.QuadPart / freq * 1000000 +
+                              (c.QuadPart % freq) * 1000000 / freq);
+}
+
+// Absolute sleep on the monotonic clock. A high-resolution waitable timer
+// (Windows 10 1803+) wakes within ~0.5 ms; plain Sleep() would round 10 ms
+// ticks up to the 15.6 ms scheduler quantum.
+void SleepUntilUs(int64_t deadline_us) {
+  static thread_local HANDLE timer = CreateWaitableTimerExW(
+      nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+      TIMER_ALL_ACCESS);
+  const int64_t delta = deadline_us - NowUs();
+  if (delta <= 0) return;
+  if (timer) {
+    LARGE_INTEGER due;
+    due.QuadPart = -delta * 10;  // relative, 100 ns units
+    if (SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+      WaitForSingleObject(timer, INFINITE);
+      return;
+    }
+  }
+  Sleep(static_cast<DWORD>((delta + 999) / 1000));
+}
+#else
 int64_t NowUs() {
   timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return static_cast<int64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000;
 }
+
+void SleepUntilUs(int64_t deadline_us) {
+  timespec ts{static_cast<time_t>(deadline_us / 1000000),
+              static_cast<long>((deadline_us % 1000000) * 1000)};
+  clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr);
+}
+#endif
 }  // namespace
 
 class TestAudioDevice : public webrtc::AudioDeviceModule {
@@ -235,9 +279,7 @@ class TestAudioDevice : public webrtc::AudioDeviceModule {
     size_t play_pos = 0;
     while (running_.load(std::memory_order_relaxed)) {
       next += 10000;
-      timespec ts{static_cast<time_t>(next / 1000000),
-                  static_cast<long>((next % 1000000) * 1000)};
-      clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr);
+      SleepUntilUs(next);
       const int64_t late = NowUs() - next;
       if (late > max_late_us_.load(std::memory_order_relaxed))
         max_late_us_.store(late, std::memory_order_relaxed);

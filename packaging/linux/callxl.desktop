@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=CallXL
+GenericName=Voice chat
+Comment=Private, peer-to-peer, end-to-end encrypted voice chat
+Exec=callxl
+Icon=callxl
+Terminal=false
+Categories=Network;Telephony;AudioVideo;Audio;
+Keywords=voice;call;chat;lan;encrypted;
+StartupNotify=true
+StartupWMClass=CallXL
+SingleMainWindow=true
