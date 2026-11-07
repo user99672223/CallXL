@@ -1,5 +1,7 @@
 [bindings.swift]
 module_name = "CallXLCore"
-ffi_module_name = "CallXLCoreFFI"
+# The iOS build ships the C FFI as `CallXLCore.framework` (framework module CallXLCore),
+# so the generated Swift imports that module; the header keeps its CallXLCoreFFI name.
+ffi_module_name = "CallXLCore"
 ffi_module_filename = "CallXLCoreFFI"
 generate_module_map = true
