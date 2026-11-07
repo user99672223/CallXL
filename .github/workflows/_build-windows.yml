@@ -39,8 +39,8 @@ env:
   CARGO_NET_RETRY: "10"
   RUSTC_WRAPPER: sccache
   SCCACHE_GHA_ENABLED: "true"
-  CC: cl.exe
-  CXX: cl.exe
+  # No CC/CXX and no vcvars: cc-rs and rustc locate MSVC through the VS installation.
+  # Under vcvars Git Bash's /usr/bin/link shadows MSVC's link.exe (D-0061).
   RUSTFLAGS: -C target-feature=+crt-static
 
 jobs:
@@ -71,12 +71,6 @@ jobs:
           TAG: ${{ inputs.version_tag }}
         run: |
           if [[ "$TAG" == *-* ]]; then scripts/check-version.sh --stamp "$TAG"; else scripts/check-version.sh "$TAG"; fi
-
-      # cl.exe, link.exe, rc.exe, dumpbin on PATH (vcvars64): cc-rs and sccache need them.
-      - uses: ilammy/msvc-dev-cmd@v1
-        if: steps.present.outputs.ok == 'true'
-        with:
-          arch: x64
 
       - name: Rust toolchain (rust-toolchain.toml)
         if: steps.present.outputs.ok == 'true'
@@ -129,12 +123,15 @@ jobs:
           CALLXL_APP_SECRET: ${{ inputs.bake_app_secret && secrets.APP_SECRET || '' }}
         run: |
           if [[ -z "$CALLXL_APP_SECRET" ]]; then unset CALLXL_APP_SECRET; fi
+          mkdir -p target/desktop-metrics
+          M=target/desktop-metrics/windows.txt
           t0=$(date +%s)
           cargo build --release -p callxl-desktop
-          echo "release build: $(( $(date +%s) - t0 )) s"
-          ls -l target/release/callxl.exe
-          target/release/callxl.exe --version
-          if command -v dumpbin >/dev/null; then dumpbin //dependents target/release/callxl.exe; fi
+          echo "release build: $(( $(date +%s) - t0 )) s" | tee -a "$M"
+          echo "callxl.exe: $(stat -c %s target/release/callxl.exe) bytes" | tee -a "$M"
+          target/release/callxl.exe --version | tee -a "$M"
+          # Informational (the §14 1 s check is the Linux job's): start on the runner's desktop.
+          (timeout 60 target/release/callxl.exe --headless-smoke 2>&1 || echo "headless smoke exit $?") | tee -a "$M"
 
       - name: Inno Setup -> CallXL-Setup.exe
         id: pkg
@@ -147,6 +144,7 @@ jobs:
           "$ISCC" //Qp "//DAppVersion=$ver" "//DBinDir=$(cygpath -w "$PWD/target/release")" \
             "//DOutDir=$(cygpath -w "$PWD/target/installer")" packaging/windows/callxl.iss
           ls -l target/installer/CallXL-Setup.exe
+          echo "CallXL-Setup.exe: $(stat -c %s target/installer/CallXL-Setup.exe) bytes" | tee -a target/desktop-metrics/windows.txt
           echo "artifact=windows-installer" >> "$GITHUB_OUTPUT"
 
       - name: Silent install / launch / uninstall smoke test
@@ -165,6 +163,7 @@ jobs:
           if [[ -e "$app" ]]; then echo "install folder still present"; ls -la "$app"; exit 1; fi
           [[ ! -e "$lnk" ]] || { echo "shortcut left behind"; exit 1; }
           echo "uninstalled cleanly"
+          echo "silent install -> $app/callxl.exe ($v) + Start menu shortcut; silent uninstall removed both" >> target/desktop-metrics/windows.txt
 
       - uses: actions/upload-artifact@v4
         if: inputs.upload_artifacts && steps.pkg.outputs.artifact != ''
@@ -172,6 +171,13 @@ jobs:
           name: windows-installer
           path: target/installer/CallXL-Setup.exe
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.present.outputs.ok == 'true'
+        with:
+          name: desktop-metrics-windows
+          path: target/desktop-metrics
+          if-no-files-found: warn
 
       - uses: actions/upload-artifact@v4
         if: always() && steps.present.outputs.ok == 'true'

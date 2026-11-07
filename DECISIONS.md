@@ -656,3 +656,14 @@ into the linux job. (2) The fork's test ADM used POSIX `clock_gettime`/`clock_na
 QueryPerformanceCounter and a high-resolution waitable timer (≈0.5 ms wake-up; plain
 `Sleep` rounds to the 15.6 ms quantum, which would break 10 ms ticks). Linux keeps the
 `clock_nanosleep` path unchanged (third_party/webrtc-sys/CALLXL_CHANGES.md).
+
+D-0130 (2026-11-07, p2/desktop) — Numbering and CI layout after PR #2. New p2/desktop
+entries use D-0130 upwards (coordinator: infra/QA D-0070+, iOS D-0100+); D-0050…D-0061
+keep their numbers (no collision). The desktop CI steps now live in the reusable
+workflows from PR #2: `_build-windows.yml` drops `CC=cl.exe` and the vcvars step (D-0061)
+and adds metrics; `_build-linux.yml` (job `package`) and `_build-windows.yml` write
+startup times, binary/installer sizes and release-build times to `target/desktop-metrics`
+and upload them as `desktop-metrics-{linux,windows}` artifacts, so the numbers can be read
+without the full job log; the ci.yml `e2e loopback` job keeps `gui_join` and saves its
+output as `e2e-artifacts-gui/gui_join.txt`. Artifact names `CallXL-Setup.exe` (in
+`windows-installer`) and `callxl_<ver>_amd64.deb` (in `linux-deb`) are unchanged.

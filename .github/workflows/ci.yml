@@ -187,7 +187,8 @@ jobs:
           wav="$(find e2e-artifacts/assets -name '*.wav' | head -1)"
           ( while true; do paplay -d callxl_null "$wav" || break; done ) &
           player=$!
-          apps/desktop/tests/gui_join.sh dist/e2e-bins/callxl dist/e2e-bins/callxl-cli
+          mkdir -p "$CALLXL_E2E_ARTIFACTS"
+          apps/desktop/tests/gui_join.sh dist/e2e-bins/callxl dist/e2e-bins/callxl-cli | tee "$CALLXL_E2E_ARTIFACTS/gui_join.txt"
           kill "$player" || true
 
       - uses: actions/upload-artifact@v4

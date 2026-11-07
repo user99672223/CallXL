@@ -166,13 +166,15 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "$CALLXL_APP_SECRET" ]]; then unset CALLXL_APP_SECRET; fi
+          mkdir -p target/desktop-metrics
+          M=target/desktop-metrics/linux.txt
           t0=$(date +%s)
           cargo build --release -p callxl-desktop
-          echo "release build: $(( $(date +%s) - t0 )) s"
+          echo "release build: $(( $(date +%s) - t0 )) s" | tee -a "$M"
           cargo deb -p callxl-desktop --no-build
           deb="$(find target/debian -maxdepth 1 -name 'callxl_*_amd64.deb' | head -1)"
           test -n "$deb"
-          echo "binary: $(stat -c %s target/release/callxl) bytes; package: $(stat -c %s "$deb") bytes ($deb)"
+          echo "binary: $(stat -c %s target/release/callxl) bytes; package: $(stat -c %s "$deb") bytes ($deb)" | tee -a "$M"
           dpkg -I "$deb"
           dpkg -c "$deb"
           sudo apt-get install -y -q "./$deb"
@@ -183,7 +185,7 @@ jobs:
           # shown + core started). Three launches: cold, then warm.
           for _ in 1 2 3; do
             out="$(xvfb-run -a callxl --headless-smoke 2>/dev/null)"
-            echo "$out"
+            echo "$out" | tee -a "$M"
             ms="$(echo "$out" | sed -n 's/^startup_ms=//p')"
             echo "$out" | grep -qx ready
             test -n "$ms" && test "$ms" -lt 1000
@@ -191,6 +193,13 @@ jobs:
           mkdir -p dist/deb && cp "$deb" dist/deb/
           echo "name=linux-deb" >> "$GITHUB_OUTPUT"
           echo "file=$(basename "$deb")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.present.outputs.ok == 'true'
+        with:
+          name: desktop-metrics-linux
+          path: target/desktop-metrics
+          if-no-files-found: warn
 
       - uses: actions/upload-artifact@v4
         if: inputs.upload_artifacts && steps.deb.outputs.name != ''
