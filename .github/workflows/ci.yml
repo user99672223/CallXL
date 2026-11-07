@@ -15,14 +15,15 @@ env:
   CARGO_INCREMENTAL: "0"
   RUSTC_WRAPPER: sccache
   SCCACHE_GHA_ENABLED: "true"
-  CC: clang-21
-  CXX: clang++-21
   WEBRTC_TAG: webrtc-a545de4
 
 jobs:
   linux:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
+    env:
+      CC: clang-21
+      CXX: clang++-21
     steps:
       - uses: actions/checkout@v4
 
@@ -214,20 +215,14 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 150
     env:
-      # MSVC (the workflow default is clang-21 for Linux); static CRT, no redistributables (§8).
-      CC: cl.exe
-      CXX: cl.exe
+      # MSVC is found by cc-rs/rustc through the VS installation (no CC/CXX, no vcvars:
+      # vcvars puts link.exe behind Git Bash's /usr/bin/link). Static CRT (§8).
       RUSTFLAGS: -C target-feature=+crt-static
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-
-      # cl.exe, link.exe, rc.exe, dumpbin on PATH (vcvars64): cc-rs and sccache need them.
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - name: Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
