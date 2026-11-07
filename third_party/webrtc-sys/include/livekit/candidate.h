@@ -31,6 +31,8 @@ namespace livekit_ffi {
 class Candidate {
  public:
   explicit Candidate(const webrtc::Candidate& candidate);
+  // CallXL: read access for callxl_candidate_info.
+  const webrtc::Candidate& get() const { return candidate_; }
 
  private:
   webrtc::Candidate candidate_;

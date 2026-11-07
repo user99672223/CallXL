@@ -103,6 +103,26 @@ bool PeerConnection::Initialize(
   return true;
 }
 
+bool PeerConnection::InitializeCallXl(
+    webrtc::PeerConnectionInterface::RTCConfiguration config,
+    bool custom_ice_controller,
+    callxl::IcePolicy policy) {
+  webrtc::PeerConnectionDependencies deps{this};
+  if (custom_ice_controller) {
+    deps.ice_transport_factory =
+        callxl::CreateCallXlIceTransportFactory(policy, &*observer_);
+  }
+  auto result =
+      pc_factory_->CreatePeerConnectionOrError(config, std::move(deps));
+  if (!result.ok()) {
+    RTC_LOG(LS_ERROR) << "Failed to create peer connection: "
+                      << result.error().message();
+    return false;
+  }
+  peer_connection_ = std::move(result.value());
+  return true;
+}
+
 void PeerConnection::set_configuration(RtcConfiguration config) const {
   auto result =
       peer_connection_->SetConfiguration(to_native_rtc_configuration(config));

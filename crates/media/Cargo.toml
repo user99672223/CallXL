@@ -9,3 +9,8 @@ description = "CallXL media plane: thin, safe wrapper over libwebrtc (via the fo
 [dependencies]
 webrtc-sys = { workspace = true }
 cxx = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

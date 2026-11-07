@@ -22,6 +22,7 @@
 #include "api/task_queue/task_queue_factory.h"
 #include "livekit/adm_proxy.h"
 #include "livekit/audio_device_controller.h"
+#include "livekit/callxl.h"
 #include "media_stream.h"
 #include "rtp_parameters.h"
 #include "rust/cxx.h"
@@ -51,7 +52,26 @@ class PeerConnectionFactory {
   PeerConnectionFactory(std::shared_ptr<RtcRuntime> rtc_runtime,
                         bool zero_playout_delay,
                         bool enable_warp);
+  // CallXL: field trials, ADM choice, Opus/ANA encoder factory, remembered APM,
+  // network filtering. See CALLXL_CHANGES.md.
+  PeerConnectionFactory(std::shared_ptr<RtcRuntime> rtc_runtime,
+                        const CallXlFactoryOptions& options);
   ~PeerConnectionFactory();
+
+  std::shared_ptr<PeerConnection> create_peer_connection_callxl(
+      RtcConfiguration config,
+      CallXlPcConfig ext,
+      rust::Box<PeerConnectionObserverWrapper> observer) const;
+  std::shared_ptr<AudioTrack> create_callxl_audio_track(rust::String label,
+                                                        CallXlApmSettings apm,
+                                                        bool ana) const;
+  rust::String field_trial_lookup(rust::String name) const;
+  bool callxl_apply_apm(CallXlApmSettings settings) const;
+  CallXlApmSettings callxl_get_apm() const;
+  CallXlAnaState callxl_ana_state() const;
+  bool callxl_uses_test_adm() const;
+  bool callxl_test_adm_flush() const;
+  CallXlTestAdmStats callxl_test_adm_stats() const;
 
   std::shared_ptr<PeerConnection> create_peer_connection(
       RtcConfiguration config,
@@ -96,6 +116,11 @@ class PeerConnectionFactory {
   // long as peer_factory_ does.
   const VideoEncoderFactory* video_encoder_factory_ = nullptr;
   webrtc::Environment env_;
+
+  // CallXL state (null/empty for factories created the upstream way).
+  std::shared_ptr<callxl::AnaShared> callxl_ana_;
+  std::shared_ptr<webrtc::scoped_refptr<webrtc::AudioProcessing>> callxl_apm_;
+  webrtc::scoped_refptr<webrtc::AudioDeviceModule> callxl_test_adm_;  // a callxl::TestAudioDevice
 };
 
 std::shared_ptr<PeerConnectionFactory> create_peer_connection_factory();

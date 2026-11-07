@@ -56,6 +56,7 @@ fn main() {
         "src/apm.rs",
         "src/audio_mixer.rs",
         "src/packet_trailer.rs",
+        "src/callxl.rs",
     ];
 
     if is_desktop {
@@ -99,6 +100,10 @@ fn main() {
         "src/av1_bitstream.cpp",
         "src/packet_trailer.cpp",
         "src/packet_trailer_av1.cpp",
+        "src/callxl.cpp",
+        "src/callxl_audio.cpp",
+        "src/callxl_ice.cpp",
+        "src/callxl_test_adm.cpp",
     ]);
 
     if is_desktop {

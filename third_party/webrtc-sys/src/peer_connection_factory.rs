@@ -36,6 +36,84 @@ pub mod ffi {
         estimated_disconnected_time_ms: i64,
     }
 
+    // ---- CallXL additions (see CALLXL_CHANGES.md) ----
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlApmSettings {
+        pub aec: bool,
+        pub ns: bool,
+        /// 0 = low, 1 = moderate, 2 = high
+        pub ns_level: i32,
+        pub high_pass: bool,
+        pub agc2: bool,
+        pub agc2_max_gain_db: f32,
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct CallXlFactoryOptions {
+        /// libwebrtc field-trial string, "Name/Value/Name2/Value2/".
+        pub field_trials: String,
+        /// PeerConnectionFactory::Options::network_ignore_mask; -1 keeps the default.
+        pub network_ignore_mask: i32,
+        /// Interface names excluded from candidate gathering.
+        pub network_ignore_list: Vec<String>,
+        pub use_test_adm: bool,
+        pub test_play_wav: String,
+        pub test_record_wav: String,
+        pub test_record_max_secs: u32,
+        pub opus_complexity: i32,
+        pub ana_enabled: bool,
+        pub ana_increase_loss: f32,
+        pub ana_decrease_loss: f32,
+        pub ana_window_ms: i32,
+        pub ana_decrease_hold_ms: i32,
+        pub apm: CallXlApmSettings,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlIceParams {
+        pub enabled: bool,
+        pub rtt_delta_ms: i32,
+        pub loss_delta: f32,
+        pub sustain_ms: i32,
+        pub cooldown_ms: i32,
+        pub v6_bonus_ms: i32,
+        pub initial_grace_ms: i32,
+        pub recheck_ms: i32,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlPcConfig {
+        pub port_allocator_flags: u32,
+        pub max_ipv6_networks: i32,
+        pub ice_connection_receiving_timeout_ms: i32,
+        pub ice_backup_ping_interval_ms: i32,
+        pub stable_writable_ping_interval_ms: i32,
+        pub ice_check_min_interval_ms: i32,
+        pub audio_jitter_buffer_min_delay_ms: i32,
+        pub audio_jitter_buffer_fast_accelerate: bool,
+        pub audio_rtcp_report_interval_ms: i32,
+        pub ice: CallXlIceParams,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlAnaState {
+        pub frame_length_ms: i32,
+        pub switches: i32,
+        pub adaptors_created: i32,
+        pub last_loss_permille: i32,
+        pub avg_loss_permille: i32,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct CallXlTestAdmStats {
+        pub active: bool,
+        pub recorded_frames: u64,
+        pub played_frames: u64,
+        pub max_tick_late_us: i64,
+        pub late_ticks: u64,
+        pub record_capacity_frames: u64,
+    }
+
     extern "C++" {
         include!("livekit/rtp_parameters.h");
         include!("livekit/rtc_error.h");
@@ -136,6 +214,27 @@ pub mod ffi {
             self: &PeerConnectionFactory,
             backend: VideoEncoderBackend,
         ) -> Vec<String>;
+
+        // ---- CallXL additions ----
+        fn create_peer_connection_callxl(
+            self: &PeerConnectionFactory,
+            config: RtcConfiguration,
+            ext: CallXlPcConfig,
+            observer: Box<PeerConnectionObserverWrapper>,
+        ) -> Result<SharedPtr<PeerConnection>>;
+        fn create_callxl_audio_track(
+            self: &PeerConnectionFactory,
+            label: String,
+            apm: CallXlApmSettings,
+            ana: bool,
+        ) -> SharedPtr<AudioTrack>;
+        fn field_trial_lookup(self: &PeerConnectionFactory, name: String) -> String;
+        fn callxl_apply_apm(self: &PeerConnectionFactory, settings: CallXlApmSettings) -> bool;
+        fn callxl_get_apm(self: &PeerConnectionFactory) -> CallXlApmSettings;
+        fn callxl_ana_state(self: &PeerConnectionFactory) -> CallXlAnaState;
+        fn callxl_uses_test_adm(self: &PeerConnectionFactory) -> bool;
+        fn callxl_test_adm_flush(self: &PeerConnectionFactory) -> bool;
+        fn callxl_test_adm_stats(self: &PeerConnectionFactory) -> CallXlTestAdmStats;
     }
 
     impl WeakPtr<PeerConnectionFactory> {}
@@ -200,6 +299,7 @@ pub mod ffi {
         fn on_track(self: &PeerConnectionObserverWrapper, transceiver: SharedPtr<RtpTransceiver>);
         fn on_remove_track(self: &PeerConnectionObserverWrapper, receiver: SharedPtr<RtpReceiver>);
         fn on_interesting_usage(self: &PeerConnectionObserverWrapper, usage_pattern: i32);
+        fn on_ice_controller_decision(self: &PeerConnectionObserverWrapper, reason: String);
     }
 }
 
@@ -232,6 +332,8 @@ pub trait PeerConnectionObserver: Send + Sync {
     fn on_track(&self, transceiver: SharedPtr<RtpTransceiver>);
     fn on_remove_track(&self, receiver: SharedPtr<RtpReceiver>);
     fn on_interesting_usage(&self, usage_pattern: i32);
+    /// CallXL: the ICE controller switched the selected pair (network thread).
+    fn on_ice_controller_decision(&self, _reason: String) {}
 }
 
 // Wrapper for PeerConnectionObserver because cxx doesn't support dyn Trait on c++
@@ -326,5 +428,9 @@ impl PeerConnectionObserverWrapper {
 
     fn on_interesting_usage(&self, usage_pattern: i32) {
         self.observer.on_interesting_usage(usage_pattern);
+    }
+
+    fn on_ice_controller_decision(&self, reason: String) {
+        self.observer.on_ice_controller_decision(reason);
     }
 }

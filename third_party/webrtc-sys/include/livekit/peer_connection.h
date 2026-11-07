@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "livekit/callxl.h"
+
 #include <memory>
 
 #include "api/peer_connection_interface.h"
@@ -54,6 +56,10 @@ class PeerConnection : webrtc::PeerConnectionObserver {
   ~PeerConnection();
 
   bool Initialize(webrtc::PeerConnectionInterface::RTCConfiguration config);
+  // CallXL: create with a custom ICE transport factory (CallXlIceController).
+  bool InitializeCallXl(webrtc::PeerConnectionInterface::RTCConfiguration config,
+                        bool custom_ice_controller,
+                        callxl::IcePolicy policy);
 
   void set_configuration(RtcConfiguration config) const;
 
