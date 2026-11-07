@@ -114,10 +114,14 @@ final class CallController: NSObject, CXProviderDelegate {
         action.contactIdentifier = title
         transport.request(CXTransaction(action: action)) { [weak self] error in
             guard let self, let error else { return }
-            self.log.error("CallKit start failed: \(error.localizedDescription, privacy: .public)")
-            if let target = pending.removeValue(forKey: uuid) {
-                MainActor.assumeIsolated { self.commands?.callKitUnavailable(target) }
-            }
+            failed(uuid, error)
+        }
+    }
+
+    private func failed(_ uuid: UUID, _ error: Error) {
+        log.error("CallKit start failed: \(error.localizedDescription, privacy: .public)")
+        if let target = pending.removeValue(forKey: uuid) {
+            MainActor.assumeIsolated { commands?.callKitUnavailable(target) }
         }
     }
 
