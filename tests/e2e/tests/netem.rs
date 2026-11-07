@@ -136,13 +136,16 @@ async fn netem_loss_backoff_recovery() -> Result<()> {
     netem.set(Family::All, Impairment { delay_ms: 20, ..Impairment::CLEAN })?;
     s.extend(sample(&a, t0, 31.0).await?);
     h.save_json("alice-samples.json", &json!(s));
+    // Attributed by when each value was measured (`t_stats`), not when it was polled.
     let dropped = s
         .iter()
-        .filter(|p| f(p, "t") > loss_on && f(p, "t") <= loss_on + 10.0)
+        .filter(|p| f(p, "t_stats") > loss_on && f(p, "t_stats") <= loss_on + 10.0)
         .map(|p| f(p, "opus_bitrate_kbps"))
         .fold(f64::INFINITY, f64::min);
-    let recovered =
-        s.iter().find(|p| f(p, "t") > loss_off && f(p, "opus_bitrate_kbps") >= 450.0).map(|p| f(p, "t") - loss_off);
+    let recovered = s
+        .iter()
+        .find(|p| f(p, "t_stats") > loss_off && f(p, "opus_bitrate_kbps") >= 450.0)
+        .map(|p| f(p, "t_stats") - loss_off);
     eprintln!("before {before} kbps, min within 10 s of loss {dropped} kbps, recovered after {recovered:?} s");
     ensure!(dropped <= before * 0.7, "target only dropped {before} -> {dropped} kbps under 5 % loss");
     ensure!(recovered.is_some_and(|t| t <= 30.0), "did not recover to 450 kbps within 30 s");

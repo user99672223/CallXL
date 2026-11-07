@@ -313,3 +313,75 @@ Holding the minimum makes the probe result irrelevant whenever media starts. Re-
 the start over a higher estimate lowered it (measured dip 510 → 465 kbps), hence the
 "only if below" rule. Local, test ADM, 2 runs × 2 sides: 452.4, 452.4, 510, 510, …;
 release after ~2.87 s at BWE 600 kbps, no re-assert needed.
+
+D-0037 (2026-11-07, p2/infra-qa) — `worker.yml`: every run (any branch touching
+`infra/worker/**`) runs the vitest suite and `wrangler deploy --dry-run` (bundles and
+validates bindings without credentials); it deploys only on the integration branch, `main`
+or a manual dispatch, and only when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
+exist (checked through step `env:`, since `if:` cannot read secrets). Otherwise it prints
+the manual set-up steps (also to the job summary) and is green. `TOKEN_SIGNING_KEY`
+persistence: generated with `openssl rand -hex 32` only when `wrangler secret list` does
+not show it, so it lives solely in Cloudflare's secret store and survives every redeploy;
+CI never rotates it (rotation would invalidate all live 1-hour tokens), and a failing
+`secret list` fails the job rather than silently generating a new key. `APP_SECRET` is
+re-put on each deploy (`wrangler secret put` overwrites idempotently). Optional
+`TURN_KEY_ID`/`TURN_API_TOKEN` repository secrets are forwarded when present.
+
+D-0038 (2026-11-07, p2/infra-qa) — Diagnostics export schema v1
+(`docs/diagnostics-export.md`): top-level `{schema, app_version, platform, ts, call,
+peers, global, series, log_tail}`, `series` as an object metric → ≤ 60 numbers, ≤ 1000 log
+lines. Writers may only add keys within v1; anything else bumps `schema`. Redaction:
+peers are public key + 8-hex tag (no display names except the user's own), no session
+names, file names, paths, device names or trusted-device list; in log lines known peer
+names → `peer:<tag>`, transfer file names → `<file>` (`files.rs` logs them on resume),
+the home directory → `~`. The validator (`crates/core/src/diagnostics/schema_v1.rs`)
+depends only on `serde_json` and is included by the e2e crate with `#[path]`: one rule
+set for unit and e2e tests without making the e2e test binaries link the core and
+libwebrtc. The export file is now `CallXL-diagnostics-<ts>.json` (brief's interface; was
+`callxl-diagnostics-`). `CallXl.config` (only read by the old export for `data_dir`,
+which the new report leaves out as a local path) was removed. Evidence: `export_schema_v1`
+on a real recorded snapshot (fixture captured from `diagnostics_complete`, proxy backend)
+and `diagnostics_complete` validating the live export (local: "export: schema v1 valid,
+6343 bytes, 16 series, 4 log lines").
+
+D-0039 (2026-11-07, p2/infra-qa) — Release versions: `scripts/check-version.sh` compares
+the tag (without `v`) to `apps/desktop/Cargo.toml` (or the workspace version it
+inherits). A final tag `vX.Y.Z` must match exactly and fails early otherwise. A
+prerelease tag `vX.Y.Z-<pre>` (e.g. the `v0.0.1-rc` dry-run while the code says 0.1.0)
+is *stamped*: the workflow writes the tag's version into the manifest before building,
+then checks, so every artifact and `CARGO_PKG_VERSION` carry the prerelease version. The
+`.deb` asset is published as `callxl_<tag version>_amd64.deb` (cargo-deb spells
+prereleases Debian-style, `0.0.1~rc`, inside the package; GitHub would mangle `~` in an
+asset name). Prerelease = tag contains `-`.
+
+D-0040 (2026-11-07, p2/infra-qa) — CI job graph: `lint` (fmt + clippy), `swift-bindgen`,
+`worker` (vitest), `linux` (`_build-linux.yml`: build + unit tests + .deb, uploads the
+debug `callxl-cli` and the five e2e test executables as `e2e-bins`), `windows`, `macos`
+start together; `e2e` (4 suites) and `netem` (`_netem-matrix.yml`, 6 scenarios) fan out
+from `e2e-bins` without recompiling. Test executables run from another job work because
+GitHub's checkout path is identical on every ubuntu runner (`CARGO_MANIFEST_DIR` paths to
+`scripts/netem.sh` and `infra/worker` stay valid); the netem legs sparse-check-out only
+`scripts` and `tests/e2e`. `APP_SECRET` is baked only into release packages
+(`bake_app_secret`), never into the CI test binaries uploaded as artifacts.
+
+D-0041 (2026-11-07, p2/infra-qa) — e2e samples carry `t_stats`, the time the returned
+stats were measured (`t` minus the snapshot's age from `DiagnosticsSnapshot.ts_ms`), and
+`netem_loss_backoff_recovery` attributes values to its windows by `t_stats` (thresholds
+unchanged: ≥ 30 % drop within 10 s of loss onset, ≥ 450 kbps within 30 s after it
+clears). The collector ticks at 1 Hz in its own phase, so the poll time overstated a
+value's age by up to 1 s. CI run 42352890429 failed "only dropped 510 -> 364.088": loss
+onset at 17.08 s, BWE falling from 24.1 s, target 301.9 kbps (≤ 357 = 70 %) in the sample
+polled at 27.1 s, i.e. 10.02 s after onset by poll time while its stats were taken
+before 27.1 s. The reaction itself varies: 4 s after onset in the green run 42351643296
+(510 → 201 kbps), 7 s in 42352890429. Local check (proxy backend) after the change: drop
+to 299.1 kbps at t_stats 19.7 s (onset 17.0 s), recovered 3.6 s after the loss cleared.
+If a CI run still misses the window by stats time, the next step is the product side
+(LossBasedBweV2 onset speed), not the window.
+
+D-0042 (2026-11-07, p2/infra-qa) — CI timing baseline (M0), the Phase 1 single serial
+`linux` job: warm caches (run 42351643296, phase1/core) 10 m 27 s wall-clock — clippy
+15 s, build 43 s, Swift bindgen 33 s, serial e2e 6 m 52 s, PulseAudio 21 s; cold caches
+on the new branch (run 42352890429; GitHub caches are per branch with fallback to the
+default branch, which had none) 22 m 02 s — clippy 5 m 11 s, build 4 m 17 s, bindgen
+1 m 56 s, e2e 8 m 59 s. sccache in the cold run: Rust 0 % hits, 67 cache write errors and
+a rust-cache save refused by the cache-service rate limit ("You've hit a rate limit").
