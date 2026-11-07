@@ -29,6 +29,36 @@
 #include "webrtc-sys/src/peer_connection.rs.h"
 #include "webrtc-sys/src/peer_connection_factory.rs.h"
 
+#if defined(WEBRTC_IOS)
+#include "api/video_codecs/video_decoder_factory.h"
+#include "api/video_codecs/video_encoder_factory.h"
+
+namespace {
+// CallXL is audio-only (video is deferred, CLAUDE.md §15). On iOS the factory gets video
+// codec factories with no formats, so nothing references libwebrtc's H.264/VP8/VP9/AV1
+// stacks or its ObjC default video factories and the linker drops them from
+// CallXLCore.framework (launch time and size, DECISIONS.md D-0104). Linux/Windows keep
+// livekit's factories unchanged.
+class NoVideoEncoderFactory : public webrtc::VideoEncoderFactory {
+ public:
+  std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override { return {}; }
+  std::unique_ptr<webrtc::VideoEncoder> Create(const webrtc::Environment&,
+                                               const webrtc::SdpVideoFormat&) override {
+    return nullptr;
+  }
+};
+
+class NoVideoDecoderFactory : public webrtc::VideoDecoderFactory {
+ public:
+  std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override { return {}; }
+  std::unique_ptr<webrtc::VideoDecoder> Create(const webrtc::Environment&,
+                                               const webrtc::SdpVideoFormat&) override {
+    return nullptr;
+  }
+};
+}  // namespace
+#endif
+
 namespace livekit_ffi {
 
 PeerConnectionFactory::PeerConnectionFactory(
@@ -75,11 +105,16 @@ PeerConnectionFactory::PeerConnectionFactory(
     dependencies.adm = adm_proxy_;
   }
 
+#if defined(WEBRTC_IOS)
+  dependencies.video_encoder_factory = std::make_unique<NoVideoEncoderFactory>();
+  dependencies.video_decoder_factory = std::make_unique<NoVideoDecoderFactory>();
+#else
   auto video_encoder_factory = std::make_unique<livekit_ffi::VideoEncoderFactory>();
   video_encoder_factory_ = video_encoder_factory.get();
   dependencies.video_encoder_factory = std::move(video_encoder_factory);
   dependencies.video_decoder_factory =
       std::make_unique<livekit_ffi::VideoDecoderFactory>();
+#endif
   dependencies.audio_encoder_factory = callxl::CreateCallXlAudioEncoderFactory(
       callxl_ana_, o.opus_complexity, o.ana_enabled);
   dependencies.audio_decoder_factory = webrtc::CreateBuiltinAudioDecoderFactory();
