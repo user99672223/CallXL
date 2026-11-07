@@ -42,14 +42,16 @@ struct DiagnosticsView: View {
 
             if let g = snap?.global {
                 Section("Global") {
-                    row("Uplink", kbps(g.uplinkKbps))
-                    row("Downlink", kbps(g.downlinkKbps))
-                    row("Media thread CPU", String(format: "%.1f %%", g.mediaThreadCpuPct))
-                    row("Signaling", "\(transport(g.signalingTransport)) · \(ms(g.signalingLatencyMs))")
-                    row("TURN this month", ByteCountFormatter.string(fromByteCount: Int64(g.turnBytesMonth), countStyle: .binary))
-                    row("Frame size (adaptor)", "\(g.anaFrameMs) ms · \(g.anaSwitches) switches · \(g.frameAdaptationMechanism)")
-                    row("Uplink loss (5 s)", String(format: "%.1f %%", g.anaUplinkLossPct))
-                    row("APM", apm(g.apm))
+                    Group {
+                        row("Uplink", kbps(g.uplinkKbps))
+                        row("Downlink", kbps(g.downlinkKbps))
+                        row("Media thread CPU", String(format: "%.1f %%", g.mediaThreadCpuPct))
+                        row("Signaling", "\(transport(g.signalingTransport)) · \(ms(g.signalingLatencyMs))")
+                        row("TURN this month", ByteCountFormatter.string(fromByteCount: Int64(g.turnBytesMonth), countStyle: .binary))
+                        row("Frame size (adaptor)", "\(g.anaFrameMs) ms · \(g.anaSwitches) switches · \(g.frameAdaptationMechanism)")
+                        row("Uplink loss (5 s)", String(format: "%.1f %%", g.anaUplinkLossPct))
+                        row("APM", apm(g.apm))
+                    }
                     if g.aecErleDb >= 0 {
                         row("AEC", String(format: "ERL %.1f dB · ERLE %.1f dB · delay %d ms", g.aecErlDb, g.aecErleDb, g.aecDelayMs))
                     }
@@ -66,15 +68,17 @@ struct DiagnosticsView: View {
 
             ForEach(snap?.peers ?? [], id: \.peerKey) { p in
                 Section(p.displayName) {
-                    row("Path", path(p.path))
-                    if let path = p.path {
-                        row("Local", "\(path.localAddr) (\(fam(path.localFamily)), \(path.localCandidateType))")
-                        row("Remote", "\(path.remoteAddr) (\(fam(path.remoteFamily)), \(path.remoteCandidateType))")
+                    Group {
+                        row("Path", path(p.path))
+                        if let path = p.path {
+                            row("Local", "\(path.localAddr) (\(fam(path.localFamily)), \(path.localCandidateType))")
+                            row("Remote", "\(path.remoteAddr) (\(fam(path.remoteFamily)), \(path.remoteCandidateType))")
+                        }
+                        row("RTT", ms(p.rttMs))
+                        row("Jitter", ms(p.jitterMs))
+                        row("Loss in / out", String(format: "%.1f %% / %.1f %%", p.lossPct, p.remoteLossPct))
+                        row("Send / receive", "\(kbps(p.sendKbps)) / \(kbps(p.recvKbps))")
                     }
-                    row("RTT", ms(p.rttMs))
-                    row("Jitter", ms(p.jitterMs))
-                    row("Loss in / out", String(format: "%.1f %% / %.1f %%", p.lossPct, p.remoteLossPct))
-                    row("Send / receive", "\(kbps(p.sendKbps)) / \(kbps(p.recvKbps))")
                     row(
                         "Opus",
                         "\(p.opusFrameMs) ms · \(kbps(p.opusBitrateKbps)) target · FEC \(p.fecEnabled ? "on" : "off") · DTX \(p.dtxEnabled ? "on" : "off")"
@@ -168,8 +172,8 @@ struct SparklineRow: View {
                     .foregroundStyle(theme.text)
             }
             Chart {
-                ForEach(Array(series.values.enumerated()), id: \.offset) { i, v in
-                    LineMark(x: .value("t", i), y: .value("v", v))
+                ForEach(Array(series.values.enumerated()), id: \.offset) { point in
+                    LineMark(x: .value("t", point.offset), y: .value("v", point.element))
                         .foregroundStyle(theme.accent)
                         .interpolationMethod(.monotone)
                 }
