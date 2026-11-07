@@ -737,3 +737,23 @@ refuses the transaction the app joins anyway and activates the session itself. F
 sending uses the system document picker (Files, iCloud, other providers) with a recipient
 picker, not a Share Extension (a second process with its own IPC to the running core);
 picked files stay security-scoped until the transfer ends, so nothing is copied.
+
+D-0105 (2026-11-07, p2/ios) — The iOS app creates and starts the Rust core off the main
+actor (`AppModel.start()`: `CallXl(config:)` opens SQLite and the keychain, `start()`
+spins up the media engine); Home renders from a placeholder snapshot and "New session"
+is enabled once the core runs. Measured under XCUITest (Debug), launch to Home went from
+4306 ms (core built in `App.init`, run 42357184261) to 2662 ms (run 42358988220); the
+core's own creation + start then took 0.2 ms + 169 ms on a background task.
+
+D-0106 (2026-11-07, p2/ios) — How §1.5 "launch to Home under 1 s on the Simulator" is
+measured: `packaging/ios/measure-launch.sh` installs the Release build and launches it
+with `xcrun simctl launch` (1 cold + 5 warm launches, real core); the app writes
+`<ms to Home> premain=… app.init=… home.appear=…` (process start = kernel start time;
+`premain` = a C constructor in the app, i.e. every dylib loaded and initialised) to
+Documents. The gate is the warm median. Not XCUITest: its launch procedure added about
+1.5 s before any app code ran, in Debug and Release alike (runs 42358988220, 42360979987:
+process start → App.init 1550–1912 ms), so the UI test only reports. A bare SwiftUI app
+(`LaunchBaseline` target, same clock) is measured in the same job as the Simulator's
+floor: 606–625 ms to its first screen (premain ~320 ms) on the macos-latest runner.
+Unit tests run the Debug build (`CallXL` scheme, @testable), UI smoke the Release build
+(`CallXLUI` scheme).

@@ -163,16 +163,6 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Launch to Home < 1 s (Release build, simctl launch, real core)
-        if: steps.present.outputs.ok == 'true'
-        timeout-minutes: 10
-        run: |
-          set -euo pipefail
-          P=target/ios/DerivedData-test/Build/Products/Release-iphonesimulator
-          # The Simulator's floor first (bare SwiftUI app, same clock), then CallXL.
-          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/LaunchBaseline.app" --report-only
-          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/CallXL.app"
-
       - name: Unsigned IPA
         id: ipa
         if: steps.present.outputs.ok == 'true'
@@ -188,6 +178,19 @@ jobs:
           name: ios-ipa
           path: target/ios/CallXL-unsigned.ipa
           if-no-files-found: error
+
+      - name: Launch to Home < 1 s (Release build, simctl launch, real core)
+        if: steps.present.outputs.ok == 'true'
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          P=target/ios/DerivedData-test/Build/Products/Release-iphonesimulator
+          # The Simulator's floor first (bare SwiftUI app, same clock), then CallXL.
+          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/LaunchBaseline.app" --report-only
+          # Attribution: + CallXLCore.framework linked (not called); + Charts/CallKit/AVKit.
+          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/LaunchBaselineCore.app" --report-only
+          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/LaunchBaselineFrameworks.app" --report-only
+          packaging/ios/measure-launch.sh "$SIM_UDID" "$P/CallXL.app"
 
       - name: swiftformat --lint (pinned 0.64.6)
         if: always() && steps.present.outputs.ok == 'true'

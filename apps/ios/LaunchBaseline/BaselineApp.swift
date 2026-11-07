@@ -6,6 +6,9 @@ import SwiftUI
 struct BaselineApp: App {
     init() {
         LaunchClock.mark("app.init")
+        #if BASELINE_FRAMEWORKS
+            _ = FrameworkUses.touch()
+        #endif
     }
 
     var body: some Scene {

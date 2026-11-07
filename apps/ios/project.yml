@@ -98,6 +98,43 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
         SWIFT_OBJC_BRIDGING_HEADER: Shared/Bridging-Header.h
         CODE_SIGN_STYLE: Automatic
+  # Launch-time attribution (never shipped): the bare app + CallXLCore.framework linked
+  # and embedded but not called, and the bare app + the UI's extra system frameworks.
+  LaunchBaselineCore:
+    type: application
+    platform: iOS
+    sources:
+      - path: LaunchBaseline
+      - path: Shared
+    dependencies:
+      - framework: ../../target/ios/CallXLCore.xcframework
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.callxl.launchbaseline.core
+        PRODUCT_NAME: LaunchBaselineCore
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/Bridging-Header.h
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+        CODE_SIGN_STYLE: Automatic
+  LaunchBaselineFrameworks:
+    type: application
+    platform: iOS
+    sources:
+      - path: LaunchBaseline
+      - path: LaunchBaselineFrameworks
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.callxl.launchbaseline.frameworks
+        PRODUCT_NAME: LaunchBaselineFrameworks
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/Bridging-Header.h
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) BASELINE_FRAMEWORKS"
+        CODE_SIGN_STYLE: Automatic
   CallXLTests:
     type: bundle.unit-test
     platform: iOS
@@ -143,6 +180,8 @@ schemes:
       targets:
         CallXL: all
         LaunchBaseline: all
+        LaunchBaselineCore: all
+        LaunchBaselineFrameworks: all
         CallXLUITests: [test]
     test:
       config: Release
