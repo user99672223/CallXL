@@ -94,16 +94,30 @@ pub struct EngineOptions {
     pub opus_complexity: i32,
 }
 
-/// Field trials from CLAUDE.md §3, with names checked against the pinned libwebrtc
-/// (`registered_field_trials.h`). `WebRTC-Audio-SendSideBwe` and
-/// `WebRTC-SendSideBwe-WithOverhead` no longer exist there: audio send-side BWE is on
-/// whenever transport-cc is negotiated and overhead accounting is the default
-/// (`WebRTC-Audio-LegacyOverhead` would disable it). `WebRTC-Audio-AlrProbing` lets the
-/// app-limited audio stream trigger ALR probes; without it the audio allocation stays
-/// at the start rate (measured: 83.2 kbps target forever vs 510 kbps within ~1 s).
-/// See DECISIONS.md.
-pub const DEFAULT_FIELD_TRIALS: &str =
-    "WebRTC-Audio-Allocation/min:32kbps,max:600kbps/WebRTC-Audio-AlrProbing/Enabled/";
+/// Field trials (names verified against the pinned libwebrtc's registered_field_trials.h,
+/// see DECISIONS.md D-0013/D-0022):
+/// - `WebRTC-Audio-Allocation`: audio allocation 32..600 kbps (§3).
+/// - `WebRTC-Bwe-ProbingConfiguration`: a single initial probe at the start rate (`p2:0`
+///   drops the default second probe at 6 × start, which took BWE to the max within
+///   250 ms of media), no further exponential probing, no probe on allocation changes,
+///   ALR probes every 2 s. Internet paths therefore start at 128 kbps, ramp with the
+///   delay-based AIMD (~8 %/s), and once Opus saturates (app-limited) an ALR probe lifts
+///   BWE to the ceiling (§3 "ramp to ceiling as BWE allows"; stability first).
+/// - `WebRTC-Audio-AlrProbing` + `WebRTC-AlrDetectorParameters`: the audio stream requests
+///   ALR probing, and ALR is detected as soon as audio uses < 95 % of the estimate (the
+///   default 65 % needs the estimate at ~1.5× the saturated Opus rate before probing).
+/// - `WebRTC-Bwe-LossBasedBweV2` instant upper bound `15 kbps / (avg_loss - 1 %)`: audio
+///   backs off under sustained random loss (5 % → ≈ 375 kbps BWE cap, 8 % → ≈ 214) and is
+///   untouched below ~3 % loss; the default (`5 % offset, 75 kbps`) never reacted to 5 %.
+///
+/// `WebRTC-Audio-SendSideBwe` / `WebRTC-SendSideBwe-WithOverhead` no longer exist: audio
+/// send-side BWE is on whenever transport-cc is negotiated and overhead accounting is the
+/// default (`WebRTC-Audio-LegacyOverhead` would disable it).
+pub const DEFAULT_FIELD_TRIALS: &str = "WebRTC-Audio-Allocation/min:32kbps,max:600kbps/\
+WebRTC-Audio-AlrProbing/Enabled/\
+WebRTC-Bwe-ProbingConfiguration/p1:1.0,p2:0,further_probe_threshold:1000,probe_max_allocation:false,alr_interval:2s/\
+WebRTC-AlrDetectorParameters/bw_usage:0.95,start:0.2,stop:0.1/\
+WebRTC-Bwe-LossBasedBweV2/InstantUpperBoundBwBalance:15kbps,InstantUpperBoundLossOffset:0.01/";
 
 impl Default for EngineOptions {
     fn default() -> Self {
@@ -159,8 +173,27 @@ pub struct MediaEngine {
 unsafe impl Send for MediaEngine {}
 unsafe impl Sync for MediaEngine {}
 
+/// Debug only: `CALLXL_RTC_LOG=<substring>` prints libwebrtc log lines containing it
+/// (`CALLXL_RTC_LOG=*` for all) to stderr. Never set in production: the sink runs on
+/// libwebrtc threads.
+fn install_rtc_log_sink() {
+    static FILTER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let Ok(f) = std::env::var("CALLXL_RTC_LOG") else { return };
+    if FILTER.set(f).is_err() {
+        return;
+    }
+    fn sink(msg: String, sev: webrtc_sys::webrtc::ffi::LoggingSeverity) {
+        let f = FILTER.get().map(String::as_str).unwrap_or("*");
+        if f == "*" || msg.contains(f) {
+            eprintln!("rtc[{sev:?}] {}", msg.trim_end());
+        }
+    }
+    std::mem::forget(webrtc_sys::webrtc::ffi::new_log_sink(sink));
+}
+
 impl MediaEngine {
     pub fn new(opts: EngineOptions) -> Result<Self> {
+        install_rtc_log_sink();
         let (use_test, play, record, secs) = match &opts.adm {
             AdmMode::Platform => (false, String::new(), String::new(), 0),
             AdmMode::Test { play_wav, record_wav, record_max_secs } => {
@@ -373,7 +406,15 @@ mod tests {
         })
         .expect("engine");
         assert_eq!(engine.field_trial("WebRTC-Audio-Allocation"), "min:32kbps,max:600kbps");
+        assert_eq!(
+            engine.field_trial("WebRTC-Bwe-ProbingConfiguration"),
+            "p1:1.0,p2:0,further_probe_threshold:1000,probe_max_allocation:false,alr_interval:2s"
+        );
         assert_eq!(engine.field_trial("WebRTC-Audio-AlrProbing"), "Enabled");
+        assert_eq!(
+            engine.field_trial("WebRTC-Bwe-LossBasedBweV2"),
+            "InstantUpperBoundBwBalance:15kbps,InstantUpperBoundLossOffset:0.01"
+        );
         assert_eq!(engine.field_trial("WebRTC-Does-Not-Exist"), "");
     }
 

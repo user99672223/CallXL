@@ -294,6 +294,8 @@ pub struct GlobalStats {
     pub frame_adaptation_mechanism: String,
     pub ana_frame_ms: u32,
     pub ana_switches: u32,
+    /// Uplink loss the frame-length controller currently averages (5 s window), percent.
+    pub ana_uplink_loss_pct: f64,
     pub rejected_signaling: u64,
     pub glare_events: u64,
     /// AEC3: echo return loss / enhancement (dB), estimated delay (ms); -1 = n/a.

@@ -99,6 +99,8 @@ pub struct PeerOpts {
     /// Index into `Harness::wav` for the microphone; recording always on.
     pub wav: usize,
     pub extra: Vec<String>,
+    /// Extra environment variables for the CLI process.
+    pub env: Vec<(String, String)>,
     pub reset_identity: bool,
     /// Reuse this data dir (restart of the same device).
     pub data_dir: Option<PathBuf>,
@@ -107,6 +109,10 @@ pub struct PeerOpts {
 impl PeerOpts {
     pub fn new(name: &str) -> Self {
         Self { name: name.into(), ..Default::default() }
+    }
+    pub fn env(mut self, k: &str, v: &str) -> Self {
+        self.env.push((k.into(), v.into()));
+        self
     }
     pub fn bind(mut self, a: &str) -> Self {
         self.bind.push(a.into());
@@ -188,6 +194,7 @@ impl Peer {
             cmd.arg("--reset-identity");
         }
         cmd.args(&o.extra);
+        cmd.envs(o.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         cmd.stdout(Stdio::piped()).stderr(Stdio::from(log)).kill_on_drop(true);
         let mut child = cmd.spawn().context("spawn callxl-cli")?;
         let stdout = child.stdout.take().unwrap();
@@ -330,9 +337,14 @@ impl Peer {
 /// Samples `diagnostics` of `peer` once per second for `secs`, returning each sample's
 /// first PeerStats (with `t` = seconds since `t0` and the ANA frame length).
 pub async fn sample(peer: &Peer, t0: Instant, secs: f64) -> Result<Vec<Value>> {
+    sample_every(peer, t0, secs, Duration::from_secs(1)).await
+}
+
+/// Like [`sample`] at a custom period (pair with `CALLXL_STATS_INTERVAL_MS` on the peer).
+pub async fn sample_every(peer: &Peer, t0: Instant, secs: f64, every: Duration) -> Result<Vec<Value>> {
     let mut out = Vec::new();
     let end = Instant::now() + Duration::from_secs_f64(secs);
-    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let mut tick = tokio::time::interval(every);
     while Instant::now() < end {
         tick.tick().await;
         let d = peer.diagnostics().await?;
@@ -340,6 +352,7 @@ pub async fn sample(peer: &Peer, t0: Instant, secs: f64) -> Result<Vec<Value>> {
             let mut p = p.clone();
             p["t"] = json!((Instant::now() - t0).as_secs_f64());
             p["ana_frame_ms"] = d["global"]["ana_frame_ms"].clone();
+            p["ana_loss_pct"] = d["global"]["ana_uplink_loss_pct"].clone();
             eprintln!("{} {}", peer.name, brief(&p));
             out.push(p);
         }
@@ -349,13 +362,15 @@ pub async fn sample(peer: &Peer, t0: Instant, secs: f64) -> Result<Vec<Value>> {
 
 pub fn brief(p: &Value) -> String {
     format!(
-        "t={:>5.1} send={:>6.1} target={:>6.1} payload={:>6.1} frame={} ana={} rtt={:>5.1} loss={:>4.1}/{:>4.1} path={}/{} sw={}",
+        "t={:>5.1} send={:>6.1} target={:>6.1} payload={:>6.1} bwe={:>5.0} frame={} ana={}/{:.1}% rtt={:>5.1} loss={:>4.1}/{:>4.1} path={}/{} sw={}",
         p["t"].as_f64().unwrap_or(0.0),
         p["send_kbps"].as_f64().unwrap_or(0.0),
         p["opus_bitrate_kbps"].as_f64().unwrap_or(0.0),
         p["opus_payload_kbps"].as_f64().unwrap_or(0.0),
+        p["available_outgoing_kbps"].as_f64().unwrap_or(0.0),
         p["opus_frame_ms"],
         p["ana_frame_ms"],
+        p["ana_loss_pct"].as_f64().unwrap_or(0.0),
         p["rtt_ms"].as_f64().unwrap_or(0.0),
         p["loss_pct"].as_f64().unwrap_or(0.0),
         p["remote_loss_pct"].as_f64().unwrap_or(0.0),

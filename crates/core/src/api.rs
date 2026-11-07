@@ -81,6 +81,7 @@ fn empty_diagnostics() -> DiagnosticsSnapshot {
             frame_adaptation_mechanism: diag::FRAME_MECHANISM.into(),
             ana_frame_ms: 0,
             ana_switches: 0,
+            ana_uplink_loss_pct: 0.0,
             rejected_signaling: 0,
             glare_events: 0,
             aec_erl_db: -1.0,
@@ -240,10 +241,11 @@ impl CallXl {
                     enabled: std::env::var("CALLXL_DISABLE_ANA").is_err(),
                     ..Default::default()
                 },
+                // Diagnostic override (first match wins): CALLXL_EXTRA_FIELD_TRIALS.
                 field_trials: format!(
                     "{}{}",
-                    callxl_media::engine_default_field_trials(),
-                    std::env::var("CALLXL_EXTRA_FIELD_TRIALS").unwrap_or_default()
+                    std::env::var("CALLXL_EXTRA_FIELD_TRIALS").unwrap_or_default(),
+                    callxl_media::engine_default_field_trials()
                 ),
                 ..Default::default()
             })

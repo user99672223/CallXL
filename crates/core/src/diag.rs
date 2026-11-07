@@ -122,9 +122,20 @@ pub fn spawn(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut prev: HashMap<PeerKey, StatsReport> = HashMap::new();
+        // Per peer: (reported frame, last raw pps-derived frame). A new frame size is
+        // reported only once two consecutive samples agree, because BWE probe/padding
+        // packets inflate one sample's packet rate (seen as a one-second 20 → 10 → 20).
+        let mut frames: HashMap<PeerKey, (u32, u32)> = HashMap::new();
         let mut rings = Rings(HashMap::new());
         let mut cpu = CpuMeter { last: None, tick: 100.0 };
-        let mut iv = tokio::time::interval(Duration::from_secs(1));
+        // §7: 1 Hz. `CALLXL_STATS_INTERVAL_MS` (debug/e2e only) samples faster to observe
+        // sub-second BWE behaviour; rates are computed from stats timestamps either way.
+        let period = std::env::var("CALLXL_STATS_INTERVAL_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|ms| (50..=1000).contains(ms))
+            .unwrap_or(1000);
+        let mut iv = tokio::time::interval(Duration::from_millis(period));
         iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             iv.tick().await;
@@ -145,7 +156,13 @@ pub fn spawn(
                 }
                 up += r.transport_send_kbps;
                 down += r.transport_recv_kbps;
-                let frame = stats::frame_ms_from_pps(r.send_pps).unwrap_or(ana.frame_length_ms.max(0) as u32);
+                let raw = stats::frame_ms_from_pps(r.send_pps).unwrap_or(ana.frame_length_ms.max(0) as u32);
+                let slot = frames.entry(l.key.clone()).or_insert((raw, raw));
+                if raw == slot.1 {
+                    slot.0 = raw;
+                }
+                slot.1 = raw;
+                let frame = slot.0;
                 let rtt = cur.pair_rtt_s.or(cur.remote_rtt_s).unwrap_or(0.0) * 1000.0;
                 let ps = PeerStats {
                     peer_key: l.key.clone(),
@@ -192,6 +209,7 @@ pub fn spawn(
                 peers.push(ps);
             }
             prev.retain(|k, _| inp.links.iter().any(|l| &l.key == k));
+            frames.retain(|k, _| inp.links.iter().any(|l| &l.key == k));
             let cpu_pct = cpu.sample();
             rings.push("uplink_kbps", up);
             rings.push("downlink_kbps", down);
@@ -215,6 +233,7 @@ pub fn spawn(
                     frame_adaptation_mechanism: FRAME_MECHANISM.to_string(),
                     ana_frame_ms: ana.frame_length_ms.max(0) as u32,
                     ana_switches: ana.switches.max(0) as u32,
+                    ana_uplink_loss_pct: f64::from(ana.avg_loss_permille.max(0)) / 10.0,
                     aec_erl_db: aec.0,
                     aec_erle_db: aec.1,
                     aec_delay_ms: aec.3,

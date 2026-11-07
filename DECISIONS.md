@@ -142,3 +142,40 @@ is `opus/48000/2` (stereo=0 governs encoding). Complexity is reported the same w
 
 D-0021 (2026-11-07, phase1) — libwebrtc's RTCStats JSON `timestamp` is in microseconds
 (rates were 1000× low before the fix); the parser accepts both units.
+
+D-0022 (2026-11-07, phase1) — BWE field trials for the §3 internet ramp and loss back-off
+(supersedes the trial list of D-0013; all measured with `CALLXL_NETEM=proxy`, 40 ms delay,
+stats sampled at 4 Hz):
+`WebRTC-Audio-Allocation/min:32kbps,max:600kbps/` `WebRTC-Audio-AlrProbing/Enabled/`
+`WebRTC-Bwe-ProbingConfiguration/p1:1.0,p2:0,further_probe_threshold:1000,probe_max_allocation:false,alr_interval:2s/`
+`WebRTC-AlrDetectorParameters/bw_usage:0.95,start:0.2,stop:0.1/`
+`WebRTC-Bwe-LossBasedBweV2/InstantUpperBoundBwBalance:15kbps,InstantUpperBoundLossOffset:0.01/`.
+Evidence: libwebrtc's initial exponential probes (default p1 3×, p2 6× start) took BWE from
+the 128 kbps start to 600 kbps within 250 ms of media (first 4 Hz sample already 600;
+probe clusters 153.6 kbps + 600 kbps in the libwebrtc log). `WebRTC-Bwe-InitialProbing/
+Disabled/` (an uncommitted attempt) had no effect on that and was dropped. With a single
+probe at the start rate and `p2:0`: first second of media BWE 157 kbps / send 131 kbps, then
+the delay-based AIMD ramp (~8 %/s); once Opus saturates (≈ 260 kbps payload) the stream is
+app-limited and the AIMD stops at 1.5 × acked rate (≈ 472 kbps), so an ALR probe is what
+lifts BWE to the 600 kbps ceiling. With the default ALR detector (65 % usage, 80 % budget)
+the first ALR probe came at 16–17 s; with 95 %/20 % at 14.2 s (Opus target ≥ 450 kbps
+14.2 s after media start). Loss back-off: the default LossBasedBweV2 never reacted to 5 %
+random loss (target 510 kbps throughout); the classic loss controller
+(`WebRTC-BweLossExperiment`, V2 off) only decreases once per RTCP RR (≈ every 5 s for
+audio), 600→585 kbps in 15 s. LossBasedBweV2's instant upper bound `15 kbps / (loss − 1 %)`
+caps BWE at ≈ 375 kbps under 5 % loss, ≈ 214 kbps under 8 % and is inert below ~3 %:
+measured 510 → 225 kbps within 4 s of 5 % loss, back to 510 kbps 3–4 s after it cleared.
+The path policy also sets `SetBitrate` bounds at PeerConnection creation (internet start,
+final max) so the per-path re-issue never raises the max (a raised max triggers an
+immediate probe to it).
+
+D-0023 (2026-11-07, phase1) — `PeerStats.opus_frame_ms` is derived from the outbound
+packet rate but only changes when two consecutive 1 Hz samples agree: ALR/BWE probe
+packets inflate one sample's packet rate (observed 20 → 10 → 20 ms readings while the
+encoder stayed at 20 ms). `GlobalStats.ana_uplink_loss_pct` exposes the loss the frame
+controller averages. The 20 → 10 ms return after loss clears is bounded by the receiver's
+audio RTCP report interval (5 s, fixed for libwebrtc receive streams; only the send side's
+`audio_rtcp_report_interval_ms` is configurable) + the 5 s average + §3's 15 s below 1 %:
+measured 24 s (averaged loss < 1 % 8 s after the loss cleared, switch 15 s later), so
+`netem_frame_adaptation` observes 32 s of clean network instead of 25 s. The §3 rule
+itself is unchanged.

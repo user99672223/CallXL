@@ -201,6 +201,14 @@ impl Core {
                 return;
             }
         };
+        // Bounds before the transport exists (DECISIONS.md D-0022): the conservative
+        // internet start with the final max, so that the path policy issued on pair
+        // selection never *raises* the max — a raised max triggers an immediate libwebrtc
+        // probe straight to it (measured: BWE 600 kbps 250 ms after media start).
+        let p0 = policy::policy_for(MPathKind::Direct, self.settings.bitrate_ceiling_kbps);
+        if let Err(e) = pc.set_bitrate(p0.bwe_min_bps, Some(p0.bwe_start_bps), p0.bwe_max_bps) {
+            tracing::warn!("set_bitrate: {e}");
+        }
         if let Err(e) = pc.add_audio_track(&self.mic, "callxl") {
             self.error(format!("could not send audio to {name}: {e}"));
         }

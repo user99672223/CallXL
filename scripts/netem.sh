@@ -33,17 +33,32 @@ case "$cmd" in
     tc qdisc del dev "$DEV" root 2>/dev/null || true
     ;;
   set)
+    # Reconfigure in place (`change`) when the qdisc layout is already right: deleting and
+    # re-adding would drop every packet queued in netem (an audible gap at each step).
     fam="$2"; args="$(netem_args "$3" "$4" "$5" "$6")"
-    tc qdisc del dev "$DEV" root 2>/dev/null || true
+    root="$(tc qdisc show dev "$DEV" root 2>/dev/null || true)"
     if [[ "$fam" == "all" ]]; then
-      # shellcheck disable=SC2086
-      tc qdisc add dev "$DEV" root netem $args
+      if [[ "$root" == *"qdisc netem"* ]]; then
+        # shellcheck disable=SC2086
+        tc qdisc change dev "$DEV" root netem $args
+      else
+        tc qdisc del dev "$DEV" root 2>/dev/null || true
+        # shellcheck disable=SC2086
+        tc qdisc add dev "$DEV" root netem $args
+      fi
     else
       proto=ip; [[ "$fam" == "v6" ]] && proto=ipv6
-      tc qdisc add dev "$DEV" root handle 1: prio bands 4 priomap 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3
-      # shellcheck disable=SC2086
-      tc qdisc add dev "$DEV" parent 1:3 handle 30: netem $args
-      tc filter add dev "$DEV" parent 1:0 protocol "$proto" prio 1 u32 match u32 0 0 flowid 1:3
+      filters="$(tc filter show dev "$DEV" parent 1:0 2>/dev/null || true)"
+      if [[ "$root" == *"qdisc prio 1:"* && "$filters" == *"protocol $proto "* ]]; then
+        # shellcheck disable=SC2086
+        tc qdisc change dev "$DEV" parent 1:3 handle 30: netem $args
+      else
+        tc qdisc del dev "$DEV" root 2>/dev/null || true
+        tc qdisc add dev "$DEV" root handle 1: prio bands 4 priomap 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3
+        # shellcheck disable=SC2086
+        tc qdisc add dev "$DEV" parent 1:3 handle 30: netem $args
+        tc filter add dev "$DEV" parent 1:0 protocol "$proto" prio 1 u32 match u32 0 0 flowid 1:3
+      fi
     fi
     ;;
   *)

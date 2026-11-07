@@ -121,7 +121,13 @@ jobs:
           pactl load-module module-null-sink sink_name=callxl_null
           pactl set-default-sink callxl_null
           pactl set-default-source callxl_null.monitor
+          # Speech into the null sink so the platform capture (its monitor) is not silence:
+          # with silence VBR Opus sends ~2 kbps and BWE has nothing to grow on (run 42337000540).
+          wav="$(ls target/e2e-artifacts/assets/*.wav | head -1)"
+          ( while true; do paplay -d callxl_null "$wav" || break; done ) &
+          player=$!
           cargo test -p callxl-e2e --test loopback -- loopback_v4_lan_policy --nocapture
+          kill "$player" || true
 
       - name: Upload callxl-cli
         if: always()
