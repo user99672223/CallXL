@@ -992,22 +992,34 @@ fn handle(core: &CallXl, vm: &mut ViewModel, c: UiCmd, tx: &Sender<Msg>, opts: &
         UiCmd::ExportDiagnostics => {
             let _ = core.export_diagnostics();
             let dir = vm.snapshot().map(|s| s.settings.download_dir.clone()).unwrap_or_default();
-            let text = format!("Report saved to {dir} (callxl-diagnostics-….json)");
-            let newest = std::fs::read_dir(&dir)
-                .ok()
-                .and_then(|rd| {
-                    rd.flatten()
-                        .filter(|e| e.file_name().to_string_lossy().starts_with("callxl-diagnostics-"))
-                        .max_by_key(|e| e.file_name())
-                })
-                .map(|e| e.path().to_string_lossy().into_owned());
-            let text = newest.map(|p| format!("Report saved to {p}")).unwrap_or(text);
+            let text = match newest_report(std::path::Path::new(&dir)) {
+                Some(p) => format!("Report saved to {}", p.display()),
+                None => format!("Report saved to {dir} ({})", report_prefix() + "….json"),
+            };
             out.push(patch(move |w, _| w.global::<App>().set_export_result(text.into())));
         }
         UiCmd::Focused(f) => vm.focused = f,
         UiCmd::Quit => {}
     }
     out
+}
+
+/// The export file name prefix, taken from the core's own naming
+/// (`callxl_core::diagnostics::export::file_name`), e.g. "CallXL-diagnostics-".
+fn report_prefix() -> String {
+    let probe = callxl_core::diagnostics::export::file_name(0);
+    probe.strip_suffix("0.json").unwrap_or(&probe).to_string()
+}
+
+/// The newest diagnostics report in `dir` (prefix matched case-insensitively).
+pub fn newest_report(dir: &std::path::Path) -> Option<PathBuf> {
+    let prefix = report_prefix().to_ascii_lowercase();
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().to_ascii_lowercase().starts_with(&prefix))
+        .max_by_key(|e| e.file_name())
+        .map(|e| e.path())
 }
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, ()> {
@@ -1110,4 +1122,24 @@ pub fn connect_callbacks(w: &AppWindow, bridge: &Bridge) {
         }
         b.send(UiCmd::SetTheme(dark));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn newest_report_matches_the_core_export_name() {
+        let dir = std::env::temp_dir().join(format!("callxl-export-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(newest_report(&dir), None);
+        for ts in [1_762_500_000_000u64, 1_762_500_000_500] {
+            let name = callxl_core::diagnostics::export::file_name(ts);
+            std::fs::write(dir.join(name), "{}").unwrap();
+        }
+        std::fs::write(dir.join("unrelated.json"), "{}").unwrap();
+        let newest = newest_report(&dir).expect("report found");
+        assert_eq!(newest.file_name().unwrap().to_string_lossy(), "CallXL-diagnostics-1762500000500.json");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
