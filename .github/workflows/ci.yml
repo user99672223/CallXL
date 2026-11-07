@@ -148,8 +148,52 @@ jobs:
             !target/**/assets
           if-no-files-found: warn
 
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    env:
+      # Apple clang for the iOS SDK (the workflow-level clang-21 is for Linux).
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchains
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Cache prebuilt iOS libwebrtc (${{ env.WEBRTC_TAG }})
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/callxl/${{ env.WEBRTC_TAG }}
+          key: libwebrtc-${{ env.WEBRTC_TAG }}-ios-device-arm64-ios-simulator-arm64
+
+      - name: Bonjour (DNS-SD) discovery backend on Apple
+        run: cargo test -p callxl-lan -- --nocapture
+
+      - name: Build CallXLCore.xcframework + Swift binding
+        run: packaging/ios/build-xcframework.sh
+
+      - name: Upload CallXLCore.xcframework
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CallXLCore.xcframework
+          path: target/ios/CallXLCore.xcframework.zip
+          if-no-files-found: warn
+
   # ---------------------------------------------------------------------------
-  # Phase 2 adds these jobs (placeholders, intentionally commented out):
+  # Phase 2 adds this job (placeholder, intentionally commented out):
   #
   # windows:
   #   runs-on: windows-latest
@@ -157,11 +201,4 @@ jobs:
   #          cargo build (static CRT) · cargo test --workspace --exclude callxl-e2e ·
   #          loopback e2e with the test ADM · Inno Setup → CallXL-Setup.exe ·
   #          silent install/uninstall smoke test · upload CallXL-Setup.exe
-  #
-  # macos:
-  #   runs-on: macos-latest
-  #   steps: checkout · libwebrtc caches (ios-device-arm64, ios-simulator-arm64) ·
-  #          cargo rustc --crate-type staticlib per target → CallXLCore.xcframework ·
-  #          uniffi-bindgen swift · xcodebuild test (iOS Simulator) · unsigned .ipa ·
-  #          upload CallXL-unsigned.ipa
   # ---------------------------------------------------------------------------
